@@ -4,7 +4,11 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CURRENT_DIR="$(pwd)"
-DEFAULT_STACK_DIR="${CURRENT_DIR}/generated-stack"
+if [[ -f "${CURRENT_DIR}/docker-compose.yml" && -d "${CURRENT_DIR}/nginx" && -d "${CURRENT_DIR}/cliproxyapi" ]]; then
+  DEFAULT_STACK_DIR="${CURRENT_DIR}"
+else
+  DEFAULT_STACK_DIR="${CURRENT_DIR}/generated-stack"
+fi
 
 DOCKER_COMPOSE=()
 SELECTED_SERVICES=()
@@ -42,7 +46,7 @@ POSTGRES_DB_VALUE="new-api"
 
 REDIS_IMAGE_VALUE="redis:7-alpine"
 
-CLIPROXY_IMAGE_VALUE="docker.1ms.run/eceasy/cli-proxy-api:latest"
+CLIPROXY_IMAGE_VALUE="eceasy/cli-proxy-api:latest"
 CLIPROXY_DEPLOY_VALUE=""
 CLIPROXY_PUBLISH_HOST_PORTS_VALUE=true
 CLIPROXY_PORT_8317_VALUE="8317"
@@ -178,7 +182,7 @@ banner() {
   fi
   printf '%s\n' "$(color_text "${COLOR_BOLD}${COLOR_GREEN}" "AI API Stack 一键部署脚本")"
   printf '%s\n' "$(color_text "$COLOR_DIM" "New API + CLIProxyAPI + Nginx + PostgreSQL + Redis")"
-  printf '%s\n' "$(color_text "$COLOR_DIM" "Docker / 证书 / 部署 / 更新 / Nginx 管理 / 镜像源 / 卸载")"
+  printf '%s\n' "$(color_text "$COLOR_DIM" "Docker / 证书 / 部署 / 更新 / Nginx 管理 / 镜像源 / 杂项 / 卸载")"
   rule "=" 72
 }
 
@@ -208,7 +212,8 @@ show_main_menu() {
   menu_option "$COLOR_YELLOW" "[5]" "Nginx 管理"
   menu_option "$COLOR_CYAN" "[6]" "Docker 国内镜像源"
   menu_option "$COLOR_RED" "[7]" "卸载部署"
-  menu_option "$COLOR_DIM" "[8]" "退出"
+  menu_option "$COLOR_BLUE" "[8]" "杂项"
+  menu_option "$COLOR_DIM" "[9]" "退出"
 }
 
 detect_lan_ip() {
@@ -459,6 +464,103 @@ join_list() {
   done
 
   printf '%s' "$output"
+}
+
+dotenv_get() {
+  local file="$1"
+  local key="$2"
+  local line=""
+  local value=""
+
+  [[ -f "$file" ]] || return 1
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ "$line" == "$key="* ]] || continue
+
+    value="${line#*=}"
+    if [[ "${#value}" -ge 2 ]]; then
+      if [[ "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
+        value="${value:1:${#value}-2}"
+      elif [[ "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
+        value="${value:1:${#value}-2}"
+      fi
+    fi
+
+    printf '%s' "$value"
+    return 0
+  done < "$file"
+
+  return 1
+}
+
+load_env_default() {
+  local env_file="$1"
+  local key="$2"
+  local __var="$3"
+  local value=""
+
+  if value="$(dotenv_get "$env_file" "$key")"; then
+    printf -v "$__var" '%s' "$value"
+  fi
+}
+
+load_existing_env_defaults() {
+  local env_file="$STACK_DIR/.env"
+
+  [[ -f "$env_file" ]] || return 0
+
+  subtle_note "检测到已有 .env，将复用其中的默认值，避免重置数据库密码和应用密钥。"
+  load_env_default "$env_file" "COMPOSE_PROJECT_NAME" PROJECT_NAME_VALUE
+  load_env_default "$env_file" "TZ" TZ_VALUE
+  load_env_default "$env_file" "APP_NET_NAME" APP_NET_NAME_VALUE
+
+  load_env_default "$env_file" "NEWAPI_IMAGE" NEWAPI_IMAGE_VALUE
+  load_env_default "$env_file" "NEWAPI_PUBLISH_HOST_PORT" NEWAPI_PUBLISH_HOST_PORT_VALUE
+  load_env_default "$env_file" "NEWAPI_HOST_PORT" NEWAPI_HOST_PORT_VALUE
+  load_env_default "$env_file" "NEWAPI_SESSION_SECRET" NEWAPI_SESSION_SECRET_VALUE
+  load_env_default "$env_file" "NEWAPI_CRYPTO_SECRET" NEWAPI_CRYPTO_SECRET_VALUE
+  load_env_default "$env_file" "NEWAPI_ERROR_LOG_ENABLED" NEWAPI_ERROR_LOG_ENABLED_VALUE
+  load_env_default "$env_file" "NEWAPI_BATCH_UPDATE_ENABLED" NEWAPI_BATCH_UPDATE_ENABLED_VALUE
+  load_env_default "$env_file" "NEWAPI_MAX_REQUEST_BODY_MB" NEWAPI_MAX_REQUEST_BODY_MB_VALUE
+  load_env_default "$env_file" "NEWAPI_MAX_FILE_DOWNLOAD_MB" NEWAPI_MAX_FILE_DOWNLOAD_MB_VALUE
+
+  load_env_default "$env_file" "POSTGRES_IMAGE" POSTGRES_IMAGE_VALUE
+  load_env_default "$env_file" "POSTGRES_USER" POSTGRES_USER_VALUE
+  load_env_default "$env_file" "POSTGRES_PASSWORD" POSTGRES_PASSWORD_VALUE
+  load_env_default "$env_file" "POSTGRES_DB" POSTGRES_DB_VALUE
+  load_env_default "$env_file" "REDIS_IMAGE" REDIS_IMAGE_VALUE
+
+  load_env_default "$env_file" "CLIPROXY_IMAGE" CLIPROXY_IMAGE_VALUE
+  load_env_default "$env_file" "CLIPROXY_DEPLOY" CLIPROXY_DEPLOY_VALUE
+  load_env_default "$env_file" "CLIPROXY_PUBLISH_HOST_PORTS" CLIPROXY_PUBLISH_HOST_PORTS_VALUE
+  load_env_default "$env_file" "CLIPROXY_PORT_8317" CLIPROXY_PORT_8317_VALUE
+  load_env_default "$env_file" "CLIPROXY_PORT_8085" CLIPROXY_PORT_8085_VALUE
+  load_env_default "$env_file" "CLIPROXY_PORT_1455" CLIPROXY_PORT_1455_VALUE
+  load_env_default "$env_file" "CLIPROXY_PORT_54545" CLIPROXY_PORT_54545_VALUE
+  load_env_default "$env_file" "CLIPROXY_PORT_51121" CLIPROXY_PORT_51121_VALUE
+  load_env_default "$env_file" "CLIPROXY_PORT_11451" CLIPROXY_PORT_11451_VALUE
+  load_env_default "$env_file" "CLIPROXY_REMOTE_SECRET" CLIPROXY_REMOTE_SECRET_VALUE
+  load_env_default "$env_file" "CLIPROXY_API_KEY" CLIPROXY_API_KEY_VALUE
+
+  load_env_default "$env_file" "NGINX_IMAGE" NGINX_IMAGE_VALUE
+  load_env_default "$env_file" "NGINX_DEPLOY_MODE" NGINX_DEPLOY_MODE_VALUE
+  load_env_default "$env_file" "NGINX_ENABLE_HTTPS" NGINX_ENABLE_HTTPS
+  load_env_default "$env_file" "NGINX_SHARE_CERT" NGINX_SHARE_CERT_VALUE
+  load_env_default "$env_file" "NGINX_HTTP_TO_HTTPS_REDIRECT" NGINX_HTTP_TO_HTTPS_REDIRECT_VALUE
+  load_env_default "$env_file" "NGINX_HTTP_PORT" NGINX_HTTP_PORT_VALUE
+  load_env_default "$env_file" "NGINX_HTTPS_PORT" NGINX_HTTPS_PORT_VALUE
+  load_env_default "$env_file" "NGINX_LAN_API_PORT" NGINX_LAN_API_PORT_VALUE
+  load_env_default "$env_file" "NGINX_LAN_ADMIN_PORT" NGINX_LAN_ADMIN_PORT_VALUE
+  load_env_default "$env_file" "NGINX_HTTP_SERVER_NAMES" NGINX_HTTP_SERVER_NAMES_VALUE
+  load_env_default "$env_file" "NGINX_API_SERVER_NAMES" NGINX_API_SERVER_NAMES_VALUE
+  load_env_default "$env_file" "NGINX_ADMIN_SERVER_NAME" NGINX_ADMIN_SERVER_NAME_VALUE
+  load_env_default "$env_file" "NGINX_API_CERT" NGINX_API_CERT_VALUE
+  load_env_default "$env_file" "NGINX_API_KEY" NGINX_API_KEY_VALUE
+  load_env_default "$env_file" "NGINX_ADMIN_CERT" NGINX_ADMIN_CERT_VALUE
+  load_env_default "$env_file" "NGINX_ADMIN_KEY" NGINX_ADMIN_KEY_VALUE
+  load_env_default "$env_file" "NGINX_NEWAPI_UPSTREAM" NGINX_NEWAPI_UPSTREAM_VALUE
+  load_env_default "$env_file" "NGINX_CLIPROXY_UPSTREAM" NGINX_CLIPROXY_UPSTREAM_VALUE
 }
 
 first_word() {
@@ -1043,6 +1145,7 @@ collect_answers() {
   section_title "基础设置"
   read_line STACK_DIR "生成目录" "$DEFAULT_STACK_DIR"
   STACK_DIR="$(expand_path "$STACK_DIR")"
+  load_existing_env_defaults
   read_line PROJECT_NAME_VALUE "Compose 项目名" "$PROJECT_NAME_VALUE"
   read_line TZ_VALUE "时区" "$TZ_VALUE"
   read_yes_no ADVANCED_CONFIG_VALUE "是否启用高级配置（自定义镜像、端口、上游地址时使用）" "$ADVANCED_CONFIG_VALUE"
@@ -1135,7 +1238,7 @@ collect_answers() {
         read_line CLIPROXY_PORT_11451_VALUE "CLIProxyAPI 11451 端口映射" "$CLIPROXY_PORT_11451_VALUE"
       fi
     else
-      CLIPROXY_IMAGE_VALUE="docker.1ms.run/eceasy/cli-proxy-api:latest"
+      CLIPROXY_IMAGE_VALUE="eceasy/cli-proxy-api:latest"
       CLIPROXY_DEPLOY_VALUE=""
       if uses_nginx_frontend; then
         CLIPROXY_PUBLISH_HOST_PORTS_VALUE=false
@@ -1284,6 +1387,8 @@ write_env_file() {
     write_env_line "REDIS_IMAGE" "$REDIS_IMAGE_VALUE"
     write_env_line "CLIPROXY_IMAGE" "$CLIPROXY_IMAGE_VALUE"
     write_env_line "CLIPROXY_DEPLOY" "$CLIPROXY_DEPLOY_VALUE"
+    write_env_line "CLIPROXY_REMOTE_SECRET" "$CLIPROXY_REMOTE_SECRET_VALUE"
+    write_env_line "CLIPROXY_API_KEY" "$CLIPROXY_API_KEY_VALUE"
     write_env_line "CLIPROXY_PUBLISH_HOST_PORTS" "$CLIPROXY_PUBLISH_HOST_PORTS_VALUE"
     write_env_line "CLIPROXY_PORT_8317" "$CLIPROXY_PORT_8317_VALUE"
     write_env_line "CLIPROXY_PORT_8085" "$CLIPROXY_PORT_8085_VALUE"
@@ -1725,6 +1830,25 @@ server {
 NGINX
 }
 
+validate_nginx_certificates() {
+  local certs=()
+  local file=""
+
+  needs_nginx_config || return 0
+  [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" && "$NGINX_ENABLE_HTTPS" == "true" ]] || return 0
+
+  certs+=("$NGINX_API_CERT_VALUE" "$NGINX_API_KEY_VALUE")
+  if [[ "$NGINX_SHARE_CERT_VALUE" != "true" ]]; then
+    certs+=("$NGINX_ADMIN_CERT_VALUE" "$NGINX_ADMIN_KEY_VALUE")
+  fi
+
+  for file in "${certs[@]}"; do
+    [[ -n "$file" ]] || die "HTTPS 证书文件名不能为空。"
+    [[ "$file" != /* && "$file" != *".."* ]] || die "证书文件名只填写 nginx/certs 下的文件名，不要填写路径：$file"
+    [[ -f "$STACK_DIR/nginx/certs/$file" ]] || die "未找到证书文件：$STACK_DIR/nginx/certs/$file。请先签发/安装证书，或确认部署时填写的文件名。"
+  done
+}
+
 write_compose_file() {
   local compose_file="$STACK_DIR/docker-compose.yml"
 
@@ -1810,7 +1934,7 @@ YAML
       - stack-internal
 
   cli-proxy-api:
-    image: "${CLIPROXY_IMAGE:-docker.1ms.run/eceasy/cli-proxy-api:latest}"
+    image: "${CLIPROXY_IMAGE:-eceasy/cli-proxy-api:latest}"
     restart: unless-stopped
     environment:
       TZ: "${TZ:-Asia/Shanghai}"
@@ -1909,6 +2033,7 @@ write_files() {
   write_env_file
   write_clipproxy_config
   write_nginx_conf
+  validate_nginx_certificates
   write_compose_file
 }
 
@@ -2294,7 +2419,6 @@ prepare_certificate_directory() {
 
 issue_aliyun_certificate() {
   local base_domain=""
-  local extra_domains=""
   local include_wildcard="true"
   local ali_key=""
   local ali_secret=""
@@ -2306,7 +2430,6 @@ issue_aliyun_certificate() {
   local reload_script=""
   local reload_cmd=""
   local domain_args=()
-  local item=""
 
   section_title "阿里云 DNS 签发证书"
   ensure_acme_sh
@@ -2337,18 +2460,11 @@ issue_aliyun_certificate() {
   read_line base_domain "主域名，例如 774966.xyz" ""
   [[ -n "$base_domain" ]] || die "主域名不能为空。"
   read_yes_no include_wildcard "是否同时签发泛域名 *.${base_domain}" "$include_wildcard"
-  read_line extra_domains "额外域名（多个用空格或逗号分隔，可留空）" ""
 
   domain_args=(-d "$base_domain")
   if [[ "$include_wildcard" == "true" ]]; then
     domain_args+=(-d "*.${base_domain}")
   fi
-
-  extra_domains="${extra_domains//,/ }"
-  extra_domains="${extra_domains//;/ }"
-  for item in $extra_domains; do
-    domain_args+=(-d "$item")
-  done
 
   read_line cert_file "安装后的 fullchain 证书文件名" "${base_domain}.fullchain.cer"
   read_line key_file "安装后的私钥文件名" "${base_domain}.key"
@@ -2456,6 +2572,100 @@ uninstall_stack() {
   section_title "卸载完成"
 }
 
+show_misc_menu() {
+  section_title "杂项"
+  menu_option "$COLOR_GREEN" "[1]" "启用 Bash/ls 颜色"
+  menu_option "$COLOR_DIM" "[2]" "返回/退出"
+}
+
+enable_bash_colors() {
+  local target_home="${HOME:-}"
+  local bashrc=""
+  local backup=""
+
+  section_title "启用 Bash/ls 颜色"
+
+  if [[ -z "$target_home" ]] && command -v getent >/dev/null 2>&1; then
+    target_home="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6 || true)"
+  fi
+  [[ -n "$target_home" ]] || target_home="/root"
+  bashrc="$target_home/.bashrc"
+
+  mkdir -p "$(dirname "$bashrc")"
+  if [[ -f "$bashrc" ]]; then
+    backup="${bashrc}.bak-$(date +%Y%m%d-%H%M%S)"
+    cp "$bashrc" "$backup"
+    field_line "备份文件：" "$backup"
+  else
+    touch "$bashrc"
+    field_line "创建文件：" "$bashrc"
+  fi
+
+  sed -i \
+    -e 's/^[[:space:]]*#\([[:space:]]*force_color_prompt=yes\)/\1/' \
+    -e 's/^[[:space:]]*#\([[:space:]]*export LS_OPTIONS=.*--color=auto.*\)/\1/' \
+    -e 's/^[[:space:]]*#\([[:space:]]*eval "\$(dircolors)".*\)/\1/' \
+    -e 's/^[[:space:]]*#\([[:space:]]*alias ls=.*LS_OPTIONS.*\)/\1/' \
+    -e 's/^[[:space:]]*#\([[:space:]]*alias ll=.*LS_OPTIONS.*\)/\1/' \
+    -e 's/^[[:space:]]*#\([[:space:]]*alias l=.*LS_OPTIONS.*\)/\1/' \
+    "$bashrc"
+
+  if ! grep -q "AI API Stack bash colors" "$bashrc"; then
+    cat >> "$bashrc" <<'BASHRC'
+
+# AI API Stack bash colors
+if [ -n "$PS1" ]; then
+  if [ "$(id -u 2>/dev/null)" = "0" ]; then
+    __ai_api_stack_prompt_color='01;31m'
+  else
+    __ai_api_stack_prompt_color='01;32m'
+  fi
+  PS1='${debian_chroot:+($debian_chroot)}\[\033['"$__ai_api_stack_prompt_color"'\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+  unset __ai_api_stack_prompt_color
+fi
+
+if command -v dircolors >/dev/null 2>&1; then
+  if [ -r ~/.dircolors ]; then
+    eval "$(dircolors -b ~/.dircolors)"
+  else
+    eval "$(dircolors -b)"
+  fi
+  alias ls='ls --color=auto'
+  alias grep='grep --color=auto'
+  alias fgrep='fgrep --color=auto'
+  alias egrep='egrep --color=auto'
+fi
+alias ll='ls -l'
+alias la='ls -A'
+alias l='ls -CF'
+# End AI API Stack bash colors
+BASHRC
+  fi
+
+  field_line "配置文件：" "$bashrc"
+  subtle_note "重新登录 SSH，或执行 source ~/.bashrc 后生效。"
+}
+
+manage_misc() {
+  local action=""
+
+  while true; do
+    show_misc_menu
+    read_line action "请选择杂项操作" "1"
+    case "$(lower "$action")" in
+      1|bash|color|colors|ls|prompt)
+        enable_bash_colors
+        ;;
+      2|back|exit|quit|q)
+        return 0
+        ;;
+      *)
+        printf '%s\n' "$(color_text "$COLOR_YELLOW" "请输入 1 或 2。")"
+        ;;
+    esac
+  done
+}
+
 print_usage() {
   cat <<'USAGE'
 用法:
@@ -2466,6 +2676,7 @@ print_usage() {
   bash one-click/deploy.sh deploy
   bash one-click/deploy.sh update
   bash one-click/deploy.sh nginx
+  bash one-click/deploy.sh misc
   bash one-click/deploy.sh uninstall
 USAGE
 }
@@ -2491,6 +2702,9 @@ parse_action() {
       ;;
     nginx|nginx-manage|nginx-manager|--nginx)
       printf '%s' "nginx"
+      ;;
+    misc|miscellaneous|utils|tools|other|others|--misc)
+      printf '%s' "misc"
       ;;
     uninstall|down|remove|rm|-u|--uninstall)
       printf '%s' "uninstall"
@@ -2549,12 +2763,16 @@ main() {
           action="uninstall"
           break
           ;;
-        8|exit|quit|q)
+        8|misc|miscellaneous|utils|tools|other|others)
+          action="misc"
+          break
+          ;;
+        9|exit|quit|q)
           printf '%s\n' "$(color_text "$COLOR_DIM" "已退出。")"
           return 0
           ;;
         *)
-          printf '%s\n' "$(color_text "$COLOR_YELLOW" "请输入 1 到 8。")"
+          printf '%s\n' "$(color_text "$COLOR_YELLOW" "请输入 1 到 9。")"
           ;;
       esac
     done
@@ -2581,6 +2799,10 @@ main() {
       ;;
     nginx)
       manage_nginx
+      return 0
+      ;;
+    misc)
+      manage_misc
       return 0
       ;;
     uninstall)

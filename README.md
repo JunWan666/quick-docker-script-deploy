@@ -97,7 +97,8 @@ bash one-click/deploy.sh
 5  Nginx 管理
 6  Docker 国内镜像源
 7  卸载部署
-8  退出
+8  杂项
+9  退出
 ```
 
 也可以直接指定功能：
@@ -109,6 +110,7 @@ bash one-click/deploy.sh deploy
 bash one-click/deploy.sh update
 bash one-click/deploy.sh nginx
 bash one-click/deploy.sh mirror
+bash one-click/deploy.sh misc
 bash one-click/deploy.sh uninstall
 ```
 
@@ -307,7 +309,21 @@ https://你的镜像源地址1 https://你的镜像源地址2
 
 如果想恢复默认源，选择清空镜像源即可。
 
-### 4.9 卸载部署
+### 4.9 杂项
+
+运行：
+
+```bash
+bash one-click/deploy.sh misc
+```
+
+当前包含：
+
+- 启用 Bash/ls 颜色：备份当前用户的 `~/.bashrc`，启用 Debian 常见颜色配置，并追加幂等的颜色配置块。
+
+修改后重新登录 SSH，或执行 `source ~/.bashrc` 生效。
+
+### 4.10 卸载部署
 
 卸载：
 
