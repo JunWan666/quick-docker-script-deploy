@@ -1,6 +1,6 @@
 <div align="center">
   <h1>AI API Stack 一键部署脚本</h1>
-  <p><strong>Docker / nginx / new-api / cli-proxy-api / gpt-image-2-webui / PostgreSQL / Redis</strong></p>
+  <p><strong>Docker / nginx / new-api / cli-proxy-api / sub2api / gpt-image-2-webui / PostgreSQL / Redis</strong></p>
   <p>一个交互式 Shell 脚本，从 Docker 环境准备到服务部署、证书、更新和 Nginx 运维都集中到一个入口。</p>
   <p>
     <img src="https://img.shields.io/badge/Debian-12-A81D33?style=for-the-badge&logo=debian&logoColor=white" alt="Debian 12" />
@@ -20,13 +20,15 @@
 
 ## 1. 脚本说明
 
-`one-click/deploy.sh` 是一个面向 Docker Compose 的一键部署和运维脚本，主要用于部署 `nginx`、`new-api`、`cli-proxy-api` 和 `gpt-image-2-webui`。
+`one-click/deploy.sh` 是一个面向 Docker Compose 的一键部署和运维脚本，主要用于部署 `nginx`、`new-api`、`cli-proxy-api`、`sub2api` 和 `gpt-image-2-webui`。
 
 - Debian 12 一键安装/检查 Docker
 - 固定使用 `/opt/ai-api-stack/` 作为安装和运维目录
 - 自动生成 `docker-compose.yml`、`.env`、`nginx/conf.d/default.conf`
 - `new-api` 自动带 PostgreSQL 和 Redis
+- `sub2api` 自动带独立 PostgreSQL 和 Redis
 - 支持部署 `gpt-image-2-webui`，默认可通过 Docker 内网连接 New API
+- Sub2API 和 GPT Image WebUI 应用容器默认加入同一个 `public-net`，外部网络名默认是 `app-net`
 - 支持局域网部署和公网域名部署
 - 支持公网 HTTPS、80 跳转 443、共用证书
 - 支持 acme.sh + 阿里云 DNS 签发泛域名证书，并在后续 HTTPS 配置中自动复用上次证书文件名
@@ -179,10 +181,10 @@ bash one-click/deploy.sh deploy
 all
 1
 2
-1234
+12345
 1 2
 1,2
-nginx new-api webui
+nginx new-api sub2api webui
 ```
 
 服务编号含义：
@@ -191,7 +193,8 @@ nginx new-api webui
 1 = nginx
 2 = new-api，自动带 PostgreSQL + Redis
 3 = cli-proxy-api
-4 = gpt-image-2-webui
+4 = sub2api，自动带独立 PostgreSQL + Redis
+5 = gpt-image-2-webui
 ```
 
 常用选择：
@@ -200,9 +203,11 @@ nginx new-api webui
 - `1`：启用 Nginx 统一代理，并拉起它代理的应用服务
 - `2`：只部署 New API
 - `3`：只部署 CPA / CLIProxyAPI
-- `4`：只部署 GPT Image WebUI
+- `4`：只部署 Sub2API
+- `5`：只部署 GPT Image WebUI
 - `23`：部署 New API + CPA，不启用 Nginx
-- `1234`：部署 Nginx + New API + CPA + GPT Image WebUI
+- `24`：部署 New API + Sub2API，不启用 Nginx
+- `12345`：部署 Nginx + New API + CPA + Sub2API + GPT Image WebUI
 
 ### 4.4 局域网部署
 
@@ -220,6 +225,7 @@ nginx new-api webui
 ```text
 New API: http://服务器局域网IP:端口
 CPA:     http://服务器局域网IP:端口
+Sub2API: http://服务器局域网IP:端口
 WebUI:   http://服务器局域网IP:端口
 ```
 
@@ -237,6 +243,7 @@ Nginx 部署模式: 2
 
 - New API 绑定域名，例如 `774966.xyz www.774966.xyz api.774966.xyz`
 - CPA 绑定域名，例如 `admin.774966.xyz`
+- Sub2API 绑定域名，例如 `sub.774966.xyz`
 - GPT Image WebUI 绑定域名，例如 `image.774966.xyz`
 - 是否共用同一张证书
 - 证书文件名和私钥文件名
@@ -363,6 +370,8 @@ docker compose down -v --remove-orphans
 │   ├── auths/
 │   ├── logs/
 │   └── config.yaml
+├── sub2api/
+│   └── data/
 ├── gpt-image-2-webui/
 │   ├── generated-images/
 │   └── logs/
@@ -376,8 +385,10 @@ docker compose down -v --remove-orphans
 
 - Debian 12 Docker 安装菜单只自动支持 Debian 12。
 - 配置 Docker 镜像源会修改 `/etc/docker/daemon.json`。
-- 选择 Nginx 后，New API、CPA 和 GPT Image WebUI 默认不暴露宿主机端口，只通过 Nginx 代理访问。
-- PostgreSQL 和 Redis 是 New API 的依赖，不需要在服务选择里单独选择。
+- 选择 Nginx 后，New API、CPA、Sub2API 和 GPT Image WebUI 默认不暴露宿主机端口，只通过 Nginx 代理访问。
+- PostgreSQL 和 Redis 是 New API / Sub2API 的依赖，不需要在服务选择里单独选择。
+- New API、CPA、Sub2API 和 GPT Image WebUI 应用容器都会加入 `public-net`；默认情况下它对应外部 Docker 网络 `app-net`。
+- Sub2API 的 PostgreSQL 和 Redis 只加入独立内部网络，不暴露给宿主机。
 - `SESSION_SECRET` 和 `CRYPTO_SECRET` 是 New API 内部密钥，不是后台登录密码。
 - 阿里云 `Ali_Key` / `Ali_Secret` 不要公开，泄露后请立即禁用或轮换。
-- 公网 HTTPS 推荐使用泛域名证书，New API、CPA 和 GPT Image WebUI 可以共用同一张证书。
+- 公网 HTTPS 推荐使用泛域名证书，New API、CPA、Sub2API 和 GPT Image WebUI 可以共用同一张证书。

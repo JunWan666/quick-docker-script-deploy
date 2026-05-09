@@ -54,6 +54,23 @@ CLIPROXY_PORT_11451_VALUE="11451"
 CLIPROXY_REMOTE_SECRET_VALUE=""
 CLIPROXY_API_KEY_VALUE=""
 
+SUB2API_IMAGE_VALUE="weishaw/sub2api:latest"
+SUB2API_POSTGRES_IMAGE_VALUE="postgres:18-alpine"
+SUB2API_REDIS_IMAGE_VALUE="redis:8-alpine"
+SUB2API_PUBLISH_HOST_PORT_VALUE=true
+SUB2API_HOST_PORT_VALUE="8081"
+SUB2API_SERVER_MODE_VALUE="release"
+SUB2API_RUN_MODE_VALUE="standard"
+SUB2API_POSTGRES_USER_VALUE="sub2api"
+SUB2API_POSTGRES_PASSWORD_VALUE=""
+SUB2API_POSTGRES_DB_VALUE="sub2api"
+SUB2API_REDIS_PASSWORD_VALUE=""
+SUB2API_ADMIN_EMAIL_VALUE="admin@sub2api.local"
+SUB2API_ADMIN_PASSWORD_VALUE=""
+SUB2API_JWT_SECRET_VALUE=""
+SUB2API_TOTP_ENCRYPTION_KEY_VALUE=""
+SUB2API_UPDATE_PROXY_URL_VALUE=""
+
 GPT_IMAGE_WEBUI_IMAGE_VALUE="tannic666/gpt-image-2-webui:latest"
 GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE=true
 GPT_IMAGE_WEBUI_HOST_PORT_VALUE="3001"
@@ -78,19 +95,24 @@ NGINX_HTTP_PORT_VALUE="80"
 NGINX_HTTPS_PORT_VALUE="443"
 NGINX_LAN_API_PORT_VALUE="80"
 NGINX_LAN_ADMIN_PORT_VALUE="8080"
-NGINX_LAN_WEBUI_PORT_VALUE="8081"
-NGINX_HTTP_SERVER_NAMES_VALUE="example.com www.example.com api.example.com admin.example.com image.example.com"
+NGINX_LAN_SUB2API_PORT_VALUE="8081"
+NGINX_LAN_WEBUI_PORT_VALUE="8082"
+NGINX_HTTP_SERVER_NAMES_VALUE="example.com www.example.com api.example.com admin.example.com sub.example.com image.example.com"
 NGINX_API_SERVER_NAMES_VALUE="example.com www.example.com api.example.com"
 NGINX_ADMIN_SERVER_NAME_VALUE="admin.example.com"
+NGINX_SUB2API_SERVER_NAMES_VALUE="sub.example.com"
 NGINX_WEBUI_SERVER_NAMES_VALUE="image.example.com"
 NGINX_API_CERT_VALUE="fullchain.cer"
 NGINX_API_KEY_VALUE="example.com.key"
 NGINX_ADMIN_CERT_VALUE="fullchain.cer"
 NGINX_ADMIN_KEY_VALUE="example.com.key"
+NGINX_SUB2API_CERT_VALUE="fullchain.cer"
+NGINX_SUB2API_KEY_VALUE="example.com.key"
 NGINX_WEBUI_CERT_VALUE="fullchain.cer"
 NGINX_WEBUI_KEY_VALUE="example.com.key"
 NGINX_NEWAPI_UPSTREAM_VALUE="new-api:3000"
 NGINX_CLIPROXY_UPSTREAM_VALUE="cli-proxy-api:8317"
+NGINX_SUB2API_UPSTREAM_VALUE="sub2api:8080"
 NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE="gpt-image-2-webui:3000"
 
 die() {
@@ -197,7 +219,7 @@ banner() {
     banner_line '/_/ |_/___/   /_/ |_/_/  /___/   /___/\__/\_,_/\__/_/\_\'
   fi
   printf '%s\n' "$(color_text "${COLOR_BOLD}${COLOR_GREEN}" "AI API Stack 一键部署脚本")"
-  printf '%s\n' "$(color_text "$COLOR_DIM" "Nginx + New API + CLIProxyAPI + GPT Image WebUI + PostgreSQL + Redis")"
+  printf '%s\n' "$(color_text "$COLOR_DIM" "Nginx + New API + CLIProxyAPI + Sub2API + GPT Image WebUI + PostgreSQL + Redis")"
   printf '%s\n' "$(color_text "$COLOR_DIM" "Docker / 证书 / 部署 / 更新 / Nginx 管理 / 镜像源 / 杂项 / 卸载")"
   rule "=" 72
 }
@@ -397,8 +419,12 @@ resolve_publish_ports() {
     ensure_available_port CLIPROXY_PORT_11451_VALUE "CLIProxyAPI 11451 直连" 11451
   fi
 
+  if [[ "$SUB2API_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+    ensure_available_port SUB2API_HOST_PORT_VALUE "Sub2API 直连" 8081 "$NEWAPI_HOST_PORT_VALUE"
+  fi
+
   if [[ "$GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
-    ensure_available_port GPT_IMAGE_WEBUI_HOST_PORT_VALUE "GPT Image WebUI 直连" 3001 "$NEWAPI_HOST_PORT_VALUE"
+    ensure_available_port GPT_IMAGE_WEBUI_HOST_PORT_VALUE "GPT Image WebUI 直连" 3001 "$SUB2API_HOST_PORT_VALUE"
   fi
 
   if ! needs_nginx_config; then
@@ -408,7 +434,8 @@ resolve_publish_ports() {
   if [[ "$NGINX_DEPLOY_MODE_VALUE" == "lan" ]]; then
     ensure_available_port NGINX_LAN_API_PORT_VALUE "Nginx 局域网 API 入口" 18080
     ensure_available_port NGINX_LAN_ADMIN_PORT_VALUE "Nginx 局域网管理端入口" 18081 "$NGINX_LAN_API_PORT_VALUE"
-    ensure_available_port NGINX_LAN_WEBUI_PORT_VALUE "Nginx 局域网 GPT Image WebUI 入口" 18082 "$NGINX_LAN_ADMIN_PORT_VALUE"
+    ensure_available_port NGINX_LAN_SUB2API_PORT_VALUE "Nginx 局域网 Sub2API 入口" 18082 "$NGINX_LAN_ADMIN_PORT_VALUE"
+    ensure_available_port NGINX_LAN_WEBUI_PORT_VALUE "Nginx 局域网 GPT Image WebUI 入口" 18083 "$NGINX_LAN_SUB2API_PORT_VALUE"
   else
     ensure_available_port NGINX_HTTP_PORT_VALUE "Nginx 公网 HTTP 入口" 18080
     if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
@@ -587,6 +614,23 @@ load_existing_env_defaults() {
   load_env_default "$env_file" "CLIPROXY_REMOTE_SECRET" CLIPROXY_REMOTE_SECRET_VALUE
   load_env_default "$env_file" "CLIPROXY_API_KEY" CLIPROXY_API_KEY_VALUE
 
+  load_env_default "$env_file" "SUB2API_IMAGE" SUB2API_IMAGE_VALUE
+  load_env_default "$env_file" "SUB2API_POSTGRES_IMAGE" SUB2API_POSTGRES_IMAGE_VALUE
+  load_env_default "$env_file" "SUB2API_REDIS_IMAGE" SUB2API_REDIS_IMAGE_VALUE
+  load_env_default "$env_file" "SUB2API_PUBLISH_HOST_PORT" SUB2API_PUBLISH_HOST_PORT_VALUE
+  load_env_default "$env_file" "SUB2API_HOST_PORT" SUB2API_HOST_PORT_VALUE
+  load_env_default "$env_file" "SUB2API_SERVER_MODE" SUB2API_SERVER_MODE_VALUE
+  load_env_default "$env_file" "SUB2API_RUN_MODE" SUB2API_RUN_MODE_VALUE
+  load_env_default "$env_file" "SUB2API_POSTGRES_USER" SUB2API_POSTGRES_USER_VALUE
+  load_env_default "$env_file" "SUB2API_POSTGRES_PASSWORD" SUB2API_POSTGRES_PASSWORD_VALUE
+  load_env_default "$env_file" "SUB2API_POSTGRES_DB" SUB2API_POSTGRES_DB_VALUE
+  load_env_default "$env_file" "SUB2API_REDIS_PASSWORD" SUB2API_REDIS_PASSWORD_VALUE
+  load_env_default "$env_file" "SUB2API_ADMIN_EMAIL" SUB2API_ADMIN_EMAIL_VALUE
+  load_env_default "$env_file" "SUB2API_ADMIN_PASSWORD" SUB2API_ADMIN_PASSWORD_VALUE
+  load_env_default "$env_file" "SUB2API_JWT_SECRET" SUB2API_JWT_SECRET_VALUE
+  load_env_default "$env_file" "SUB2API_TOTP_ENCRYPTION_KEY" SUB2API_TOTP_ENCRYPTION_KEY_VALUE
+  load_env_default "$env_file" "SUB2API_UPDATE_PROXY_URL" SUB2API_UPDATE_PROXY_URL_VALUE
+
   load_env_default "$env_file" "GPT_IMAGE_WEBUI_IMAGE" GPT_IMAGE_WEBUI_IMAGE_VALUE
   load_env_default "$env_file" "GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT" GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE
   load_env_default "$env_file" "GPT_IMAGE_WEBUI_HOST_PORT" GPT_IMAGE_WEBUI_HOST_PORT_VALUE
@@ -611,19 +655,24 @@ load_existing_env_defaults() {
   load_env_default "$env_file" "NGINX_HTTPS_PORT" NGINX_HTTPS_PORT_VALUE
   load_env_default "$env_file" "NGINX_LAN_API_PORT" NGINX_LAN_API_PORT_VALUE
   load_env_default "$env_file" "NGINX_LAN_ADMIN_PORT" NGINX_LAN_ADMIN_PORT_VALUE
+  load_env_default "$env_file" "NGINX_LAN_SUB2API_PORT" NGINX_LAN_SUB2API_PORT_VALUE
   load_env_default "$env_file" "NGINX_LAN_WEBUI_PORT" NGINX_LAN_WEBUI_PORT_VALUE
   load_env_default "$env_file" "NGINX_HTTP_SERVER_NAMES" NGINX_HTTP_SERVER_NAMES_VALUE
   load_env_default "$env_file" "NGINX_API_SERVER_NAMES" NGINX_API_SERVER_NAMES_VALUE
   load_env_default "$env_file" "NGINX_ADMIN_SERVER_NAME" NGINX_ADMIN_SERVER_NAME_VALUE
+  load_env_default "$env_file" "NGINX_SUB2API_SERVER_NAMES" NGINX_SUB2API_SERVER_NAMES_VALUE
   load_env_default "$env_file" "NGINX_WEBUI_SERVER_NAMES" NGINX_WEBUI_SERVER_NAMES_VALUE
   load_env_default "$env_file" "NGINX_API_CERT" NGINX_API_CERT_VALUE
   load_env_default "$env_file" "NGINX_API_KEY" NGINX_API_KEY_VALUE
   load_env_default "$env_file" "NGINX_ADMIN_CERT" NGINX_ADMIN_CERT_VALUE
   load_env_default "$env_file" "NGINX_ADMIN_KEY" NGINX_ADMIN_KEY_VALUE
+  load_env_default "$env_file" "NGINX_SUB2API_CERT" NGINX_SUB2API_CERT_VALUE
+  load_env_default "$env_file" "NGINX_SUB2API_KEY" NGINX_SUB2API_KEY_VALUE
   load_env_default "$env_file" "NGINX_WEBUI_CERT" NGINX_WEBUI_CERT_VALUE
   load_env_default "$env_file" "NGINX_WEBUI_KEY" NGINX_WEBUI_KEY_VALUE
   load_env_default "$env_file" "NGINX_NEWAPI_UPSTREAM" NGINX_NEWAPI_UPSTREAM_VALUE
   load_env_default "$env_file" "NGINX_CLIPROXY_UPSTREAM" NGINX_CLIPROXY_UPSTREAM_VALUE
+  load_env_default "$env_file" "NGINX_SUB2API_UPSTREAM" NGINX_SUB2API_UPSTREAM_VALUE
   load_env_default "$env_file" "NGINX_GPT_IMAGE_WEBUI_UPSTREAM" NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE
 }
 
@@ -695,7 +744,10 @@ service_from_token() {
     3|cliproxy|cliproxyapi|cli-proxy-api|cli|cpa)
       printf 'cli-proxy-api'
       ;;
-    4|gpt-image-2-webui|gpt-image-webui|gptimage|gpt-image|image-webui|webui|image)
+    4|sub2api|sub-api|subapi|sub|subscription)
+      printf 'sub2api'
+      ;;
+    5|gpt-image-2-webui|gpt-image-webui|gptimage|gpt-image|image-webui|webui|image|image2)
       printf 'gpt-image-2-webui'
       ;;
     *)
@@ -721,9 +773,10 @@ select_services() {
   menu_option "$COLOR_GREEN" " 1)" "nginx"
   menu_option "$COLOR_GREEN" " 2)" "new-api"
   menu_option "$COLOR_GREEN" " 3)" "cli-proxy-api"
-  menu_option "$COLOR_GREEN" " 4)" "gpt-image-2-webui"
-  subtle_note "postgres 和 redis 是 new-api 的内置依赖，不单独选择。"
-  subtle_note "输入 all、1234、1 2、1,2 或服务名都可以；选 1 会启用 Nginx。"
+  menu_option "$COLOR_GREEN" " 4)" "sub2api"
+  menu_option "$COLOR_GREEN" " 5)" "gpt-image-2-webui"
+  subtle_note "new-api 和 sub2api 的 PostgreSQL / Redis 依赖会自动处理，不单独选择。"
+  subtle_note "输入 all、12345、1 2、1,2 或服务名都可以；选 1 会启用 Nginx。"
 
   while true; do
     read_line raw "要部署的服务" "all"
@@ -742,7 +795,7 @@ select_services() {
     SELECTED_SERVICES=()
 
     for token in $raw; do
-      if [[ "$token" =~ ^[1234]+$ && "${#token}" -gt 1 ]]; then
+      if [[ "$token" =~ ^[12345]+$ && "${#token}" -gt 1 ]]; then
         local index=0
         local char=""
         for ((index = 0; index < ${#token}; index++)); do
@@ -780,6 +833,12 @@ needs_postgres_config() {
 
 needs_cliproxy_config() {
   selected_or_all "cli-proxy-api" && return 0
+  selected_or_all "nginx" && return 0
+  return 1
+}
+
+needs_sub2api_config() {
+  selected_or_all "sub2api" && return 0
   selected_or_all "nginx" && return 0
   return 1
 }
@@ -864,6 +923,8 @@ read_nginx_certificate_files() {
       NGINX_API_KEY_VALUE="$last_key"
       NGINX_ADMIN_CERT_VALUE="$last_cert"
       NGINX_ADMIN_KEY_VALUE="$last_key"
+      NGINX_SUB2API_CERT_VALUE="$last_cert"
+      NGINX_SUB2API_KEY_VALUE="$last_key"
       NGINX_WEBUI_CERT_VALUE="$last_cert"
       NGINX_WEBUI_KEY_VALUE="$last_key"
       printf '已设置：所有 Nginx HTTPS 站点共用证书 %s / %s。\n' "$last_cert" "$last_key"
@@ -871,7 +932,7 @@ read_nginx_certificate_files() {
     fi
   fi
 
-  read_yes_no share_cert "New API、CPA 和 GPT Image WebUI 是否共用同一个证书" "$NGINX_SHARE_CERT_VALUE"
+  read_yes_no share_cert "New API、CPA、Sub2API 和 GPT Image WebUI 是否共用同一个证书" "$NGINX_SHARE_CERT_VALUE"
   NGINX_SHARE_CERT_VALUE="$share_cert"
 
   if [[ "$NGINX_SHARE_CERT_VALUE" == "true" ]]; then
@@ -879,9 +940,11 @@ read_nginx_certificate_files() {
     read_line NGINX_API_KEY_VALUE "nginx/certs 里的私钥文件名" "$NGINX_API_KEY_VALUE"
     NGINX_ADMIN_CERT_VALUE="$NGINX_API_CERT_VALUE"
     NGINX_ADMIN_KEY_VALUE="$NGINX_API_KEY_VALUE"
+    NGINX_SUB2API_CERT_VALUE="$NGINX_API_CERT_VALUE"
+    NGINX_SUB2API_KEY_VALUE="$NGINX_API_KEY_VALUE"
     NGINX_WEBUI_CERT_VALUE="$NGINX_API_CERT_VALUE"
     NGINX_WEBUI_KEY_VALUE="$NGINX_API_KEY_VALUE"
-    printf '已设置：New API、CPA 和 GPT Image WebUI 共用证书 %s / %s。\n' "$NGINX_API_CERT_VALUE" "$NGINX_API_KEY_VALUE"
+    printf '已设置：New API、CPA、Sub2API 和 GPT Image WebUI 共用证书 %s / %s。\n' "$NGINX_API_CERT_VALUE" "$NGINX_API_KEY_VALUE"
     return
   fi
 
@@ -889,6 +952,8 @@ read_nginx_certificate_files() {
   read_line NGINX_API_KEY_VALUE "nginx/certs 里的 New API 私钥文件名" "$NGINX_API_KEY_VALUE"
   read_line NGINX_ADMIN_CERT_VALUE "nginx/certs 里的 CPA 证书文件名" "$NGINX_ADMIN_CERT_VALUE"
   read_line NGINX_ADMIN_KEY_VALUE "nginx/certs 里的 CPA 私钥文件名" "$NGINX_ADMIN_KEY_VALUE"
+  read_line NGINX_SUB2API_CERT_VALUE "nginx/certs 里的 Sub2API 证书文件名" "$NGINX_SUB2API_CERT_VALUE"
+  read_line NGINX_SUB2API_KEY_VALUE "nginx/certs 里的 Sub2API 私钥文件名" "$NGINX_SUB2API_KEY_VALUE"
   read_line NGINX_WEBUI_CERT_VALUE "nginx/certs 里的 GPT Image WebUI 证书文件名" "$NGINX_WEBUI_CERT_VALUE"
   read_line NGINX_WEBUI_KEY_VALUE "nginx/certs 里的 GPT Image WebUI 私钥文件名" "$NGINX_WEBUI_KEY_VALUE"
 }
@@ -1224,8 +1289,17 @@ service_from_compose_token() {
     3|cli-proxy-api|cliproxy-api|cliproxy|cpa|admin)
       printf 'cli-proxy-api'
       ;;
-    4|gpt-image-2-webui|gpt-image-webui|gptimage|gpt-image|image-webui|webui|image)
+    4|sub2api|sub-api|subapi|sub|subscription)
+      printf 'sub2api'
+      ;;
+    5|gpt-image-2-webui|gpt-image-webui|gptimage|gpt-image|image-webui|webui|image|image2)
       printf 'gpt-image-2-webui'
+      ;;
+    sub2api-postgres|sub2api-pg|sub2api-db)
+      printf 'sub2api-postgres'
+      ;;
+    sub2api-redis|sub2api-cache)
+      printf 'sub2api-redis'
       ;;
     postgres|postgresql|pg|db|database)
       printf 'postgres'
@@ -1253,7 +1327,7 @@ select_compose_targets() {
   local service=""
 
   COMPOSE_TARGETS=()
-  subtle_note "输入 all 表示全部；也可以输入 1234、1 2、1,2、nginx、webui、postgres、redis。"
+  subtle_note "输入 all 表示全部；也可以输入 12345、1 2、1,2、nginx、sub2api、webui、postgres、redis。"
 
   while true; do
     read_line raw "请选择要操作的服务" "all"
@@ -1269,7 +1343,7 @@ select_compose_targets() {
 
     COMPOSE_TARGETS=()
     for token in $raw; do
-      if [[ "$token" =~ ^[1234]+$ && "${#token}" -gt 1 ]]; then
+      if [[ "$token" =~ ^[12345]+$ && "${#token}" -gt 1 ]]; then
         local index=0
         local char=""
         for ((index = 0; index < ${#token}; index++)); do
@@ -1302,6 +1376,11 @@ collect_answers() {
   POSTGRES_PASSWORD_VALUE="$(random_hex 16)"
   CLIPROXY_REMOTE_SECRET_VALUE="$(random_hex 32)"
   CLIPROXY_API_KEY_VALUE="$(random_hex 32)"
+  SUB2API_POSTGRES_PASSWORD_VALUE="$(random_hex 16)"
+  SUB2API_REDIS_PASSWORD_VALUE="$(random_hex 16)"
+  SUB2API_ADMIN_PASSWORD_VALUE="$(random_hex 12)"
+  SUB2API_JWT_SECRET_VALUE="$(random_hex 32)"
+  SUB2API_TOTP_ENCRYPTION_KEY_VALUE="$(random_hex 32)"
 
   section_title "基础设置"
   use_fixed_stack_dir
@@ -1411,6 +1490,60 @@ collect_answers() {
     fi
   fi
 
+  if needs_sub2api_config; then
+    [[ -n "$SUB2API_POSTGRES_PASSWORD_VALUE" ]] || SUB2API_POSTGRES_PASSWORD_VALUE="$(random_hex 16)"
+    [[ -n "$SUB2API_REDIS_PASSWORD_VALUE" ]] || SUB2API_REDIS_PASSWORD_VALUE="$(random_hex 16)"
+    [[ -n "$SUB2API_ADMIN_PASSWORD_VALUE" ]] || SUB2API_ADMIN_PASSWORD_VALUE="$(random_hex 12)"
+    [[ -n "$SUB2API_JWT_SECRET_VALUE" ]] || SUB2API_JWT_SECRET_VALUE="$(random_hex 32)"
+    [[ -n "$SUB2API_TOTP_ENCRYPTION_KEY_VALUE" ]] || SUB2API_TOTP_ENCRYPTION_KEY_VALUE="$(random_hex 32)"
+
+    if [[ "$ADVANCED_CONFIG_VALUE" == "true" ]]; then
+      section_title "Sub2API 配置"
+      read_line SUB2API_IMAGE_VALUE "Sub2API 镜像" "$SUB2API_IMAGE_VALUE"
+      read_line SUB2API_POSTGRES_IMAGE_VALUE "Sub2API PostgreSQL 镜像" "$SUB2API_POSTGRES_IMAGE_VALUE"
+      read_line SUB2API_REDIS_IMAGE_VALUE "Sub2API Redis 镜像" "$SUB2API_REDIS_IMAGE_VALUE"
+      read_line SUB2API_SERVER_MODE_VALUE "Sub2API SERVER_MODE" "$SUB2API_SERVER_MODE_VALUE"
+      read_line SUB2API_RUN_MODE_VALUE "Sub2API RUN_MODE" "$SUB2API_RUN_MODE_VALUE"
+      read_line SUB2API_POSTGRES_USER_VALUE "Sub2API PostgreSQL 用户名" "$SUB2API_POSTGRES_USER_VALUE"
+      read_line SUB2API_POSTGRES_PASSWORD_VALUE "Sub2API PostgreSQL 密码（明文）" "$SUB2API_POSTGRES_PASSWORD_VALUE"
+      read_line SUB2API_POSTGRES_DB_VALUE "Sub2API PostgreSQL 数据库名" "$SUB2API_POSTGRES_DB_VALUE"
+      read_line SUB2API_REDIS_PASSWORD_VALUE "Sub2API Redis 密码（明文）" "$SUB2API_REDIS_PASSWORD_VALUE"
+      read_line SUB2API_ADMIN_EMAIL_VALUE "Sub2API 管理员邮箱" "$SUB2API_ADMIN_EMAIL_VALUE"
+      read_line SUB2API_ADMIN_PASSWORD_VALUE "Sub2API 管理员密码（明文）" "$SUB2API_ADMIN_PASSWORD_VALUE"
+      read_line SUB2API_JWT_SECRET_VALUE "Sub2API JWT_SECRET（明文）" "$SUB2API_JWT_SECRET_VALUE"
+      read_line SUB2API_TOTP_ENCRYPTION_KEY_VALUE "Sub2API TOTP_ENCRYPTION_KEY（明文）" "$SUB2API_TOTP_ENCRYPTION_KEY_VALUE"
+      read_line SUB2API_UPDATE_PROXY_URL_VALUE "Sub2API 更新代理 URL（可留空）" "$SUB2API_UPDATE_PROXY_URL_VALUE"
+      if uses_nginx_frontend; then
+        SUB2API_PUBLISH_HOST_PORT_VALUE=false
+        printf '已选择 Nginx，Sub2API 默认不映射宿主机端口，只通过 Nginx 访问。\n'
+      else
+        read_yes_no SUB2API_PUBLISH_HOST_PORT_VALUE "是否开放 Sub2API 直连端口" "$SUB2API_PUBLISH_HOST_PORT_VALUE"
+      fi
+      if [[ "$SUB2API_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+        read_line SUB2API_HOST_PORT_VALUE "Sub2API 主机端口" "$SUB2API_HOST_PORT_VALUE"
+      fi
+    else
+      SUB2API_IMAGE_VALUE="weishaw/sub2api:latest"
+      SUB2API_POSTGRES_IMAGE_VALUE="postgres:18-alpine"
+      SUB2API_REDIS_IMAGE_VALUE="redis:8-alpine"
+      SUB2API_SERVER_MODE_VALUE="release"
+      SUB2API_RUN_MODE_VALUE="standard"
+      SUB2API_POSTGRES_USER_VALUE="sub2api"
+      SUB2API_POSTGRES_DB_VALUE="sub2api"
+      if uses_nginx_frontend; then
+        SUB2API_PUBLISH_HOST_PORT_VALUE=false
+        printf '已选择 Nginx，Sub2API 默认只通过 Nginx 访问。\n'
+      else
+        SUB2API_PUBLISH_HOST_PORT_VALUE=true
+      fi
+    fi
+    [[ -n "$SUB2API_POSTGRES_PASSWORD_VALUE" ]] || SUB2API_POSTGRES_PASSWORD_VALUE="$(random_hex 16)"
+    [[ -n "$SUB2API_REDIS_PASSWORD_VALUE" ]] || SUB2API_REDIS_PASSWORD_VALUE="$(random_hex 16)"
+    [[ -n "$SUB2API_ADMIN_PASSWORD_VALUE" ]] || SUB2API_ADMIN_PASSWORD_VALUE="$(random_hex 12)"
+    [[ -n "$SUB2API_JWT_SECRET_VALUE" ]] || SUB2API_JWT_SECRET_VALUE="$(random_hex 32)"
+    [[ -n "$SUB2API_TOTP_ENCRYPTION_KEY_VALUE" ]] || SUB2API_TOTP_ENCRYPTION_KEY_VALUE="$(random_hex 32)"
+  fi
+
   if needs_gpt_image_webui_config; then
     if [[ -z "$GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL_VALUE" ]]; then
       GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL_VALUE="$(default_gpt_image_webui_base_url)"
@@ -1476,11 +1609,18 @@ collect_answers() {
           printf 'API 入口端口和管理端端口不能相同，请重新输入。\n'
         done
         while true; do
-          read_line NGINX_LAN_WEBUI_PORT_VALUE "局域网 GPT Image WebUI 入口主机端口" "$NGINX_LAN_WEBUI_PORT_VALUE"
-          if [[ "$NGINX_LAN_WEBUI_PORT_VALUE" != "$NGINX_LAN_API_PORT_VALUE" && "$NGINX_LAN_WEBUI_PORT_VALUE" != "$NGINX_LAN_ADMIN_PORT_VALUE" ]]; then
+          read_line NGINX_LAN_SUB2API_PORT_VALUE "局域网 Sub2API 入口主机端口" "$NGINX_LAN_SUB2API_PORT_VALUE"
+          if [[ "$NGINX_LAN_SUB2API_PORT_VALUE" != "$NGINX_LAN_API_PORT_VALUE" && "$NGINX_LAN_SUB2API_PORT_VALUE" != "$NGINX_LAN_ADMIN_PORT_VALUE" ]]; then
             break
           fi
-          printf 'WebUI 入口端口不能和 API / 管理端端口相同，请重新输入。\n'
+          printf 'Sub2API 入口端口不能和 API / 管理端端口相同，请重新输入。\n'
+        done
+        while true; do
+          read_line NGINX_LAN_WEBUI_PORT_VALUE "局域网 GPT Image WebUI 入口主机端口" "$NGINX_LAN_WEBUI_PORT_VALUE"
+          if [[ "$NGINX_LAN_WEBUI_PORT_VALUE" != "$NGINX_LAN_API_PORT_VALUE" && "$NGINX_LAN_WEBUI_PORT_VALUE" != "$NGINX_LAN_ADMIN_PORT_VALUE" && "$NGINX_LAN_WEBUI_PORT_VALUE" != "$NGINX_LAN_SUB2API_PORT_VALUE" ]]; then
+            break
+          fi
+          printf 'WebUI 入口端口不能和 API / 管理端 / Sub2API 端口相同，请重新输入。\n'
         done
       else
         read_yes_no https_enabled "是否启用 Nginx HTTPS 配置" "$NGINX_ENABLE_HTTPS"
@@ -1496,15 +1636,17 @@ collect_answers() {
         fi
         read_line NGINX_API_SERVER_NAMES_VALUE "New API 绑定域名（多个空格分隔）" "$NGINX_API_SERVER_NAMES_VALUE"
         read_line NGINX_ADMIN_SERVER_NAME_VALUE "CLIProxyAPI 绑定域名（多个空格分隔）" "$NGINX_ADMIN_SERVER_NAME_VALUE"
+        read_line NGINX_SUB2API_SERVER_NAMES_VALUE "Sub2API 绑定域名（多个空格分隔）" "$NGINX_SUB2API_SERVER_NAMES_VALUE"
         read_line NGINX_WEBUI_SERVER_NAMES_VALUE "GPT Image WebUI 绑定域名（多个空格分隔）" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
-        NGINX_HTTP_SERVER_NAMES_VALUE="${NGINX_API_SERVER_NAMES_VALUE} ${NGINX_ADMIN_SERVER_NAME_VALUE} ${NGINX_WEBUI_SERVER_NAMES_VALUE}"
+        NGINX_HTTP_SERVER_NAMES_VALUE="${NGINX_API_SERVER_NAMES_VALUE} ${NGINX_ADMIN_SERVER_NAME_VALUE} ${NGINX_SUB2API_SERVER_NAMES_VALUE} ${NGINX_WEBUI_SERVER_NAMES_VALUE}"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           read_nginx_certificate_files
         fi
         read_line NGINX_NEWAPI_UPSTREAM_VALUE "New API 上游地址" "$NGINX_NEWAPI_UPSTREAM_VALUE"
         read_line NGINX_CLIPROXY_UPSTREAM_VALUE "CLIProxyAPI 上游地址" "$NGINX_CLIPROXY_UPSTREAM_VALUE"
+        read_line NGINX_SUB2API_UPSTREAM_VALUE "Sub2API 上游地址" "$NGINX_SUB2API_UPSTREAM_VALUE"
         read_line NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE "GPT Image WebUI 上游地址" "$NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE"
-        printf '已绑定：New API -> %s；CLIProxyAPI -> %s；GPT Image WebUI -> %s。\n' "$NGINX_API_SERVER_NAMES_VALUE" "$NGINX_ADMIN_SERVER_NAME_VALUE" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
+        printf '已绑定：New API -> %s；CLIProxyAPI -> %s；Sub2API -> %s；GPT Image WebUI -> %s。\n' "$NGINX_API_SERVER_NAMES_VALUE" "$NGINX_ADMIN_SERVER_NAME_VALUE" "$NGINX_SUB2API_SERVER_NAMES_VALUE" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           if [[ "$NGINX_HTTP_TO_HTTPS_REDIRECT_VALUE" == "true" ]]; then
             printf 'HTTP 80 会 301 跳转到 HTTPS 端口 %s。\n' "$NGINX_HTTPS_PORT_VALUE"
@@ -1531,17 +1673,19 @@ collect_answers() {
       if [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" ]]; then
         read_line NGINX_API_SERVER_NAMES_VALUE "New API 绑定域名（多个空格分隔）" "$NGINX_API_SERVER_NAMES_VALUE"
         read_line NGINX_ADMIN_SERVER_NAME_VALUE "CLIProxyAPI 绑定域名（多个空格分隔）" "$NGINX_ADMIN_SERVER_NAME_VALUE"
+        read_line NGINX_SUB2API_SERVER_NAMES_VALUE "Sub2API 绑定域名（多个空格分隔）" "$NGINX_SUB2API_SERVER_NAMES_VALUE"
         read_line NGINX_WEBUI_SERVER_NAMES_VALUE "GPT Image WebUI 绑定域名（多个空格分隔）" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
-        NGINX_HTTP_SERVER_NAMES_VALUE="${NGINX_API_SERVER_NAMES_VALUE} ${NGINX_ADMIN_SERVER_NAME_VALUE} ${NGINX_WEBUI_SERVER_NAMES_VALUE}"
+        NGINX_HTTP_SERVER_NAMES_VALUE="${NGINX_API_SERVER_NAMES_VALUE} ${NGINX_ADMIN_SERVER_NAME_VALUE} ${NGINX_SUB2API_SERVER_NAMES_VALUE} ${NGINX_WEBUI_SERVER_NAMES_VALUE}"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           read_nginx_certificate_files
         fi
       fi
       NGINX_NEWAPI_UPSTREAM_VALUE="new-api:3000"
       NGINX_CLIPROXY_UPSTREAM_VALUE="cli-proxy-api:8317"
+      NGINX_SUB2API_UPSTREAM_VALUE="sub2api:8080"
       NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE="gpt-image-2-webui:3000"
       if [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" ]]; then
-        printf '已绑定：New API -> %s；CLIProxyAPI -> %s；GPT Image WebUI -> %s。\n' "$NGINX_API_SERVER_NAMES_VALUE" "$NGINX_ADMIN_SERVER_NAME_VALUE" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
+        printf '已绑定：New API -> %s；CLIProxyAPI -> %s；Sub2API -> %s；GPT Image WebUI -> %s。\n' "$NGINX_API_SERVER_NAMES_VALUE" "$NGINX_ADMIN_SERVER_NAME_VALUE" "$NGINX_SUB2API_SERVER_NAMES_VALUE" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           if [[ "$NGINX_HTTP_TO_HTTPS_REDIRECT_VALUE" == "true" ]]; then
             printf 'HTTP 80 会 301 跳转到 HTTPS 端口 %s。\n' "$NGINX_HTTPS_PORT_VALUE"
@@ -1581,6 +1725,7 @@ prepare_directories() {
   mkdir -p "$STACK_DIR/new-api/logs"
   mkdir -p "$STACK_DIR/cliproxyapi/auths"
   mkdir -p "$STACK_DIR/cliproxyapi/logs"
+  mkdir -p "$STACK_DIR/sub2api/data"
   mkdir -p "$STACK_DIR/gpt-image-2-webui/generated-images"
   mkdir -p "$STACK_DIR/gpt-image-2-webui/logs"
   mkdir -p "$STACK_DIR/nginx/conf.d"
@@ -1619,6 +1764,22 @@ write_env_file() {
     write_env_line "CLIPROXY_PORT_54545" "$CLIPROXY_PORT_54545_VALUE"
     write_env_line "CLIPROXY_PORT_51121" "$CLIPROXY_PORT_51121_VALUE"
     write_env_line "CLIPROXY_PORT_11451" "$CLIPROXY_PORT_11451_VALUE"
+    write_env_line "SUB2API_IMAGE" "$SUB2API_IMAGE_VALUE"
+    write_env_line "SUB2API_POSTGRES_IMAGE" "$SUB2API_POSTGRES_IMAGE_VALUE"
+    write_env_line "SUB2API_REDIS_IMAGE" "$SUB2API_REDIS_IMAGE_VALUE"
+    write_env_line "SUB2API_PUBLISH_HOST_PORT" "$SUB2API_PUBLISH_HOST_PORT_VALUE"
+    write_env_line "SUB2API_HOST_PORT" "$SUB2API_HOST_PORT_VALUE"
+    write_env_line "SUB2API_SERVER_MODE" "$SUB2API_SERVER_MODE_VALUE"
+    write_env_line "SUB2API_RUN_MODE" "$SUB2API_RUN_MODE_VALUE"
+    write_env_line "SUB2API_POSTGRES_USER" "$SUB2API_POSTGRES_USER_VALUE"
+    write_env_line "SUB2API_POSTGRES_PASSWORD" "$SUB2API_POSTGRES_PASSWORD_VALUE"
+    write_env_line "SUB2API_POSTGRES_DB" "$SUB2API_POSTGRES_DB_VALUE"
+    write_env_line "SUB2API_REDIS_PASSWORD" "$SUB2API_REDIS_PASSWORD_VALUE"
+    write_env_line "SUB2API_ADMIN_EMAIL" "$SUB2API_ADMIN_EMAIL_VALUE"
+    write_env_line "SUB2API_ADMIN_PASSWORD" "$SUB2API_ADMIN_PASSWORD_VALUE"
+    write_env_line "SUB2API_JWT_SECRET" "$SUB2API_JWT_SECRET_VALUE"
+    write_env_line "SUB2API_TOTP_ENCRYPTION_KEY" "$SUB2API_TOTP_ENCRYPTION_KEY_VALUE"
+    write_env_line "SUB2API_UPDATE_PROXY_URL" "$SUB2API_UPDATE_PROXY_URL_VALUE"
     write_env_line "GPT_IMAGE_WEBUI_IMAGE" "$GPT_IMAGE_WEBUI_IMAGE_VALUE"
     write_env_line "GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT" "$GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE"
     write_env_line "GPT_IMAGE_WEBUI_HOST_PORT" "$GPT_IMAGE_WEBUI_HOST_PORT_VALUE"
@@ -1642,19 +1803,24 @@ write_env_file() {
     write_env_line "NGINX_HTTPS_PORT" "$NGINX_HTTPS_PORT_VALUE"
     write_env_line "NGINX_LAN_API_PORT" "$NGINX_LAN_API_PORT_VALUE"
     write_env_line "NGINX_LAN_ADMIN_PORT" "$NGINX_LAN_ADMIN_PORT_VALUE"
+    write_env_line "NGINX_LAN_SUB2API_PORT" "$NGINX_LAN_SUB2API_PORT_VALUE"
     write_env_line "NGINX_LAN_WEBUI_PORT" "$NGINX_LAN_WEBUI_PORT_VALUE"
     write_env_line "NGINX_HTTP_SERVER_NAMES" "$NGINX_HTTP_SERVER_NAMES_VALUE"
     write_env_line "NGINX_API_SERVER_NAMES" "$NGINX_API_SERVER_NAMES_VALUE"
     write_env_line "NGINX_ADMIN_SERVER_NAME" "$NGINX_ADMIN_SERVER_NAME_VALUE"
+    write_env_line "NGINX_SUB2API_SERVER_NAMES" "$NGINX_SUB2API_SERVER_NAMES_VALUE"
     write_env_line "NGINX_WEBUI_SERVER_NAMES" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
     write_env_line "NGINX_API_CERT" "$NGINX_API_CERT_VALUE"
     write_env_line "NGINX_API_KEY" "$NGINX_API_KEY_VALUE"
     write_env_line "NGINX_ADMIN_CERT" "$NGINX_ADMIN_CERT_VALUE"
     write_env_line "NGINX_ADMIN_KEY" "$NGINX_ADMIN_KEY_VALUE"
+    write_env_line "NGINX_SUB2API_CERT" "$NGINX_SUB2API_CERT_VALUE"
+    write_env_line "NGINX_SUB2API_KEY" "$NGINX_SUB2API_KEY_VALUE"
     write_env_line "NGINX_WEBUI_CERT" "$NGINX_WEBUI_CERT_VALUE"
     write_env_line "NGINX_WEBUI_KEY" "$NGINX_WEBUI_KEY_VALUE"
     write_env_line "NGINX_NEWAPI_UPSTREAM" "$NGINX_NEWAPI_UPSTREAM_VALUE"
     write_env_line "NGINX_CLIPROXY_UPSTREAM" "$NGINX_CLIPROXY_UPSTREAM_VALUE"
+    write_env_line "NGINX_SUB2API_UPSTREAM" "$NGINX_SUB2API_UPSTREAM_VALUE"
     write_env_line "NGINX_GPT_IMAGE_WEBUI_UPSTREAM" "$NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE"
   } > "$env_file"
 }
@@ -1756,9 +1922,30 @@ server {
     }
 }
 
-# 3. GPT Image WebUI
+# 3. Sub2API
 server {
     listen 8081 default_server;
+    server_name _;
+
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass http://${NGINX_SUB2API_UPSTREAM_VALUE};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}
+
+# 4. GPT Image WebUI
+server {
+    listen 8082 default_server;
     server_name _;
 
     client_max_body_size 0;
@@ -1855,7 +2042,35 @@ server {
     }
 }
 
-# 3. GPT Image WebUI
+# 3. Sub2API
+server {
+    listen 443 ssl;
+    server_name ${NGINX_SUB2API_SERVER_NAMES_VALUE};
+
+    ssl_certificate      /etc/nginx/certs/${NGINX_SUB2API_CERT_VALUE};
+    ssl_certificate_key  /etc/nginx/certs/${NGINX_SUB2API_KEY_VALUE};
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass http://${NGINX_SUB2API_UPSTREAM_VALUE};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}
+
+# 4. GPT Image WebUI
 server {
     listen 443 ssl;
     server_name ${NGINX_WEBUI_SERVER_NAMES_VALUE};
@@ -1957,7 +2172,35 @@ server {
     }
 }
 
-# 3. GPT Image WebUI
+# 3. Sub2API
+server {
+    listen 443 ssl;
+    server_name ${NGINX_SUB2API_SERVER_NAMES_VALUE};
+
+    ssl_certificate      /etc/nginx/certs/${NGINX_SUB2API_CERT_VALUE};
+    ssl_certificate_key  /etc/nginx/certs/${NGINX_SUB2API_KEY_VALUE};
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass http://${NGINX_SUB2API_UPSTREAM_VALUE};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}
+
+# 4. GPT Image WebUI
 server {
     listen 443 ssl;
     server_name ${NGINX_WEBUI_SERVER_NAMES_VALUE};
@@ -2037,7 +2280,28 @@ server {
     }
 }
 
-# 3. GPT Image WebUI - HTTP
+# 3. Sub2API - HTTP
+server {
+    listen 80;
+    server_name ${NGINX_SUB2API_SERVER_NAMES_VALUE};
+
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass http://${NGINX_SUB2API_UPSTREAM_VALUE};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}
+
+# 4. GPT Image WebUI - HTTP
 server {
     listen 80;
     server_name ${NGINX_WEBUI_SERVER_NAMES_VALUE};
@@ -2058,7 +2322,7 @@ server {
     }
 }
 
-# 4. API 服务 (New API) - HTTPS
+# 5. API 服务 (New API) - HTTPS
 server {
     listen 443 ssl;
     server_name ${NGINX_API_SERVER_NAMES_VALUE};
@@ -2086,7 +2350,7 @@ server {
     }
 }
 
-# 5. 管理后台 (CPA / CLIProxyAPI) - HTTPS
+# 6. 管理后台 (CPA / CLIProxyAPI) - HTTPS
 server {
     listen 443 ssl;
     server_name ${NGINX_ADMIN_SERVER_NAME_VALUE};
@@ -2115,7 +2379,35 @@ server {
     }
 }
 
-# 6. GPT Image WebUI - HTTPS
+# 7. Sub2API - HTTPS
+server {
+    listen 443 ssl;
+    server_name ${NGINX_SUB2API_SERVER_NAMES_VALUE};
+
+    ssl_certificate      /etc/nginx/certs/${NGINX_SUB2API_CERT_VALUE};
+    ssl_certificate_key  /etc/nginx/certs/${NGINX_SUB2API_KEY_VALUE};
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass http://${NGINX_SUB2API_UPSTREAM_VALUE};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}
+
+# 8. GPT Image WebUI - HTTPS
 server {
     listen 443 ssl;
     server_name ${NGINX_WEBUI_SERVER_NAMES_VALUE};
@@ -2197,7 +2489,28 @@ server {
     }
 }
 
-# 3. GPT Image WebUI
+# 3. Sub2API
+server {
+    listen 80;
+    server_name ${NGINX_SUB2API_SERVER_NAMES_VALUE};
+
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass http://${NGINX_SUB2API_UPSTREAM_VALUE};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}
+
+# 4. GPT Image WebUI
 server {
     listen 80;
     server_name ${NGINX_WEBUI_SERVER_NAMES_VALUE};
@@ -2230,6 +2543,7 @@ validate_nginx_certificates() {
   certs+=("$NGINX_API_CERT_VALUE" "$NGINX_API_KEY_VALUE")
   if [[ "$NGINX_SHARE_CERT_VALUE" != "true" ]]; then
     certs+=("$NGINX_ADMIN_CERT_VALUE" "$NGINX_ADMIN_KEY_VALUE")
+    certs+=("$NGINX_SUB2API_CERT_VALUE" "$NGINX_SUB2API_KEY_VALUE")
     certs+=("$NGINX_WEBUI_CERT_VALUE" "$NGINX_WEBUI_KEY_VALUE")
   fi
 
@@ -2352,6 +2666,113 @@ YAML
     networks:
       - public-net
 
+  sub2api:
+    image: "${SUB2API_IMAGE:-weishaw/sub2api:latest}"
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
+    volumes:
+      - ./sub2api/data:/app/data
+    environment:
+      AUTO_SETUP: "true"
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: "8080"
+      SERVER_MODE: "${SUB2API_SERVER_MODE:-release}"
+      RUN_MODE: "${SUB2API_RUN_MODE:-standard}"
+      DATABASE_HOST: "sub2api-postgres"
+      DATABASE_PORT: "5432"
+      DATABASE_USER: "${SUB2API_POSTGRES_USER:-sub2api}"
+      DATABASE_PASSWORD: "${SUB2API_POSTGRES_PASSWORD:-change-me}"
+      DATABASE_DBNAME: "${SUB2API_POSTGRES_DB:-sub2api}"
+      DATABASE_SSLMODE: "disable"
+      REDIS_HOST: "sub2api-redis"
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: "${SUB2API_REDIS_PASSWORD:-change-me}"
+      REDIS_DB: "0"
+      REDIS_ENABLE_TLS: "false"
+      ADMIN_EMAIL: "${SUB2API_ADMIN_EMAIL:-admin@sub2api.local}"
+      ADMIN_PASSWORD: "${SUB2API_ADMIN_PASSWORD:-}"
+      JWT_SECRET: "${SUB2API_JWT_SECRET:-}"
+      JWT_EXPIRE_HOUR: "24"
+      TOTP_ENCRYPTION_KEY: "${SUB2API_TOTP_ENCRYPTION_KEY:-}"
+      TZ: "${TZ:-Asia/Shanghai}"
+      SECURITY_URL_ALLOWLIST_ENABLED: "false"
+      SECURITY_URL_ALLOWLIST_ALLOW_INSECURE_HTTP: "true"
+      SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS: "true"
+      UPDATE_PROXY_URL: "${SUB2API_UPDATE_PROXY_URL:-}"
+YAML
+
+  if [[ "$SUB2API_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+    cat >> "$compose_file" <<'YAML'
+    ports:
+      - "${SUB2API_HOST_PORT:-8081}:8080"
+YAML
+  fi
+
+  cat >> "$compose_file" <<'YAML'
+    depends_on:
+      sub2api-postgres:
+        condition: service_healthy
+      sub2api-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - public-net
+      - sub2api-internal
+
+  sub2api-postgres:
+    image: "${SUB2API_POSTGRES_IMAGE:-postgres:18-alpine}"
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
+    volumes:
+      - sub2api-postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: "${SUB2API_POSTGRES_USER:-sub2api}"
+      POSTGRES_PASSWORD: "${SUB2API_POSTGRES_PASSWORD:-change-me}"
+      POSTGRES_DB: "${SUB2API_POSTGRES_DB:-sub2api}"
+      PGDATA: "/var/lib/postgresql/data"
+      TZ: "${TZ:-Asia/Shanghai}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SUB2API_POSTGRES_USER:-sub2api} -d ${SUB2API_POSTGRES_DB:-sub2api}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - sub2api-internal
+
+  sub2api-redis:
+    image: "${SUB2API_REDIS_IMAGE:-redis:8-alpine}"
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 100000
+        hard: 100000
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes", "--appendfsync", "everysec", "--requirepass", "${SUB2API_REDIS_PASSWORD:-change-me}"]
+    volumes:
+      - sub2api-redis-data:/data
+    environment:
+      TZ: "${TZ:-Asia/Shanghai}"
+      REDISCLI_AUTH: "${SUB2API_REDIS_PASSWORD:-change-me}"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDISCLI_AUTH}\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - sub2api-internal
+
   gpt-image-2-webui:
     image: "${GPT_IMAGE_WEBUI_IMAGE:-tannic666/gpt-image-2-webui:latest}"
     restart: unless-stopped
@@ -2394,7 +2815,8 @@ YAML
     cat >> "$compose_file" <<'YAML'
       - "${NGINX_LAN_API_PORT:-80}:80"
       - "${NGINX_LAN_ADMIN_PORT:-8080}:8080"
-      - "${NGINX_LAN_WEBUI_PORT:-8081}:8081"
+      - "${NGINX_LAN_SUB2API_PORT:-8081}:8081"
+      - "${NGINX_LAN_WEBUI_PORT:-8082}:8082"
 YAML
   else
     cat >> "$compose_file" <<'YAML'
@@ -2423,6 +2845,7 @@ YAML
     depends_on:
       - new-api
       - cli-proxy-api
+      - sub2api
       - gpt-image-2-webui
     networks:
       - public-net
@@ -2430,6 +2853,8 @@ YAML
 volumes:
   postgres-data:
   redis-data:
+  sub2api-postgres-data:
+  sub2api-redis-data:
 
 networks:
 YAML
@@ -2449,6 +2874,8 @@ YAML
 
   cat >> "$compose_file" <<'YAML'
   stack-internal:
+    driver: bridge
+  sub2api-internal:
     driver: bridge
 YAML
 }
@@ -2519,14 +2946,17 @@ print_summary() {
   local lan_ip=""
   local api_primary=""
   local admin_primary=""
+  local sub2api_primary=""
   local webui_primary=""
   local newapi_url=""
   local cliproxy_url=""
+  local sub2api_url=""
   local webui_url=""
 
   lan_ip="$(detect_lan_ip)"
   api_primary="$(first_word "$NGINX_API_SERVER_NAMES_VALUE")"
   admin_primary="$(first_word "$NGINX_ADMIN_SERVER_NAME_VALUE")"
+  sub2api_primary="$(first_word "$NGINX_SUB2API_SERVER_NAMES_VALUE")"
   webui_primary="$(first_word "$NGINX_WEBUI_SERVER_NAMES_VALUE")"
 
   if needs_nginx_config; then
@@ -2534,24 +2964,29 @@ print_summary() {
       if [[ -n "$lan_ip" ]]; then
         newapi_url="http://${lan_ip}:${NGINX_LAN_API_PORT_VALUE}"
         cliproxy_url="http://${lan_ip}:${NGINX_LAN_ADMIN_PORT_VALUE}"
+        sub2api_url="http://${lan_ip}:${NGINX_LAN_SUB2API_PORT_VALUE}"
         webui_url="http://${lan_ip}:${NGINX_LAN_WEBUI_PORT_VALUE}"
       else
         newapi_url="http://服务器IP:${NGINX_LAN_API_PORT_VALUE}"
         cliproxy_url="http://服务器IP:${NGINX_LAN_ADMIN_PORT_VALUE}"
+        sub2api_url="http://服务器IP:${NGINX_LAN_SUB2API_PORT_VALUE}"
         webui_url="http://服务器IP:${NGINX_LAN_WEBUI_PORT_VALUE}"
       fi
     elif [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
       newapi_url="$(url_with_port https "$api_primary" "$NGINX_HTTPS_PORT_VALUE")"
       cliproxy_url="$(url_with_port https "$admin_primary" "$NGINX_HTTPS_PORT_VALUE")"
+      sub2api_url="$(url_with_port https "$sub2api_primary" "$NGINX_HTTPS_PORT_VALUE")"
       webui_url="$(url_with_port https "$webui_primary" "$NGINX_HTTPS_PORT_VALUE")"
     else
       newapi_url="$(url_with_port http "$api_primary" "$NGINX_HTTP_PORT_VALUE")"
       cliproxy_url="$(url_with_port http "$admin_primary" "$NGINX_HTTP_PORT_VALUE")"
+      sub2api_url="$(url_with_port http "$sub2api_primary" "$NGINX_HTTP_PORT_VALUE")"
       webui_url="$(url_with_port http "$webui_primary" "$NGINX_HTTP_PORT_VALUE")"
     fi
   else
     newapi_url="http://服务器IP:${NEWAPI_HOST_PORT_VALUE}"
     cliproxy_url="http://服务器IP:${CLIPROXY_PORT_8317_VALUE}"
+    sub2api_url="http://服务器IP:${SUB2API_HOST_PORT_VALUE}"
     webui_url="http://服务器IP:${GPT_IMAGE_WEBUI_HOST_PORT_VALUE}"
   fi
 
@@ -2566,11 +3001,13 @@ print_summary() {
       field_line "Nginx 模式：" "局域网，不需要域名。"
       field_line "New API 入口端口：" "$NGINX_LAN_API_PORT_VALUE"
       field_line "CPA 入口端口：" "$NGINX_LAN_ADMIN_PORT_VALUE"
+      field_line "Sub2API 入口端口：" "$NGINX_LAN_SUB2API_PORT_VALUE"
       field_line "GPT Image WebUI 入口端口：" "$NGINX_LAN_WEBUI_PORT_VALUE"
     else
       field_line "Nginx 模式：" "公网，按域名转发。"
       field_line "New API 绑定域名：" "$NGINX_API_SERVER_NAMES_VALUE"
       field_line "CPA 绑定域名：" "$NGINX_ADMIN_SERVER_NAME_VALUE"
+      field_line "Sub2API 绑定域名：" "$NGINX_SUB2API_SERVER_NAMES_VALUE"
       field_line "GPT Image WebUI 绑定域名：" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
       field_line "公网 HTTP 端口：" "$NGINX_HTTP_PORT_VALUE"
       if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
@@ -2591,6 +3028,10 @@ print_summary() {
     if [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" && "$NGINX_API_SERVER_NAMES_VALUE" != "" ]]; then
       field_line "绑定域名：" "$NGINX_API_SERVER_NAMES_VALUE"
     fi
+    field_line "PostgreSQL 用户名：" "$POSTGRES_USER_VALUE"
+    field_line "PostgreSQL 密码：" "$POSTGRES_PASSWORD_VALUE"
+    field_line "PostgreSQL 数据库名：" "$POSTGRES_DB_VALUE"
+    field_line "Redis：" "内部网络 redis:6379，无宿主机端口映射。"
     field_line "SESSION_SECRET：" "$NEWAPI_SESSION_SECRET_VALUE"
     field_line "CRYPTO_SECRET：" "$NEWAPI_CRYPTO_SECRET_VALUE"
     subtle_note "上面两个是 New API 内部会话签名和数据加密密钥，不是后台登录密码；部署后不要随便修改。"
@@ -2622,6 +3063,28 @@ print_summary() {
     fi
   fi
 
+  if needs_sub2api_config; then
+    section_title "Sub2API 信息"
+    field_line "访问地址：" "$sub2api_url"
+    field_line "健康检查：" "${sub2api_url%/}/health"
+    field_line "数据目录：" "$STACK_DIR/sub2api/data"
+    if needs_nginx_config && [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" && "$NGINX_SUB2API_SERVER_NAMES_VALUE" != "" ]]; then
+      field_line "绑定域名：" "$NGINX_SUB2API_SERVER_NAMES_VALUE"
+    fi
+    field_line "管理员邮箱：" "$SUB2API_ADMIN_EMAIL_VALUE"
+    field_line "管理员密码：" "$SUB2API_ADMIN_PASSWORD_VALUE"
+    field_line "PostgreSQL 用户名：" "$SUB2API_POSTGRES_USER_VALUE"
+    field_line "PostgreSQL 密码：" "$SUB2API_POSTGRES_PASSWORD_VALUE"
+    field_line "PostgreSQL 数据库名：" "$SUB2API_POSTGRES_DB_VALUE"
+    field_line "Redis 密码：" "$SUB2API_REDIS_PASSWORD_VALUE"
+    if [[ "$SUB2API_PUBLISH_HOST_PORT_VALUE" != "true" ]]; then
+      subtle_note "Sub2API 未映射宿主机端口，只通过 Nginx / Docker 网络访问。"
+    else
+      field_line "直连端口：" "$SUB2API_HOST_PORT_VALUE"
+    fi
+    subtle_note "Sub2API 应用容器已加入 public-net；默认就是外部 app-net。数据库和 Redis 使用独立内部网络。"
+  fi
+
   if needs_gpt_image_webui_config; then
     section_title "GPT Image WebUI 信息"
     field_line "访问地址：" "$webui_url"
@@ -2643,14 +3106,7 @@ print_summary() {
     else
       field_line "直连端口：" "$GPT_IMAGE_WEBUI_HOST_PORT_VALUE"
     fi
-  fi
-
-  if needs_postgres_config; then
-    section_title "PostgreSQL / Redis 信息"
-    field_line "PostgreSQL 用户名：" "$POSTGRES_USER_VALUE"
-    field_line "PostgreSQL 密码：" "$POSTGRES_PASSWORD_VALUE"
-    field_line "PostgreSQL 数据库名：" "$POSTGRES_DB_VALUE"
-    field_line "Redis：" "内部网络 redis:6379，无宿主机端口映射。"
+    subtle_note "GPT Image WebUI 已加入 public-net；默认就是外部 app-net。"
   fi
 
   if [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" && "$NGINX_ENABLE_HTTPS" == "true" ]]; then
@@ -2666,6 +3122,8 @@ print_summary() {
       field_line "New API 私钥：" "$NGINX_API_KEY_VALUE"
       field_line "CPA 证书：" "$NGINX_ADMIN_CERT_VALUE"
       field_line "CPA 私钥：" "$NGINX_ADMIN_KEY_VALUE"
+      field_line "Sub2API 证书：" "$NGINX_SUB2API_CERT_VALUE"
+      field_line "Sub2API 私钥：" "$NGINX_SUB2API_KEY_VALUE"
       field_line "GPT Image WebUI 证书：" "$NGINX_WEBUI_CERT_VALUE"
       field_line "GPT Image WebUI 私钥：" "$NGINX_WEBUI_KEY_VALUE"
     fi
