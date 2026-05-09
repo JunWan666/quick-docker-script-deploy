@@ -1,6 +1,6 @@
 <div align="center">
   <h1>AI API Stack 一键部署脚本</h1>
-  <p><strong>Docker / new-api / cli-proxy-api / nginx / PostgreSQL / Redis</strong></p>
+  <p><strong>Docker / nginx / new-api / cli-proxy-api / gpt-image-2-webui / PostgreSQL / Redis</strong></p>
   <p>一个交互式 Shell 脚本，从 Docker 环境准备到服务部署、证书、更新和 Nginx 运维都集中到一个入口。</p>
   <p>
     <img src="https://img.shields.io/badge/Debian-12-A81D33?style=for-the-badge&logo=debian&logoColor=white" alt="Debian 12" />
@@ -20,15 +20,16 @@
 
 ## 1. 脚本说明
 
-`one-click/deploy.sh` 是一个面向 Docker Compose 的一键部署和运维脚本，主要用于部署 `new-api`、`cli-proxy-api` 和 `nginx`。
+`one-click/deploy.sh` 是一个面向 Docker Compose 的一键部署和运维脚本，主要用于部署 `nginx`、`new-api`、`cli-proxy-api` 和 `gpt-image-2-webui`。
 
 - Debian 12 一键安装/检查 Docker
-- 自动生成 `generated-stack/` 部署目录
+- 固定使用 `/opt/ai-api-stack/` 作为安装和运维目录
 - 自动生成 `docker-compose.yml`、`.env`、`nginx/conf.d/default.conf`
 - `new-api` 自动带 PostgreSQL 和 Redis
+- 支持部署 `gpt-image-2-webui`，默认可通过 Docker 内网连接 New API
 - 支持局域网部署和公网域名部署
 - 支持公网 HTTPS、80 跳转 443、共用证书
-- 支持 acme.sh + 阿里云 DNS 签发泛域名证书
+- 支持 acme.sh + 阿里云 DNS 签发泛域名证书，并在后续 HTTPS 配置中自动复用上次证书文件名
 - 支持按需配置 Docker 国内镜像源
 - 支持更新镜像、重建容器、Nginx 测试/重载/重启/日志
 
@@ -79,7 +80,7 @@ curl -fsSL http://192.168.11.6:7878/one-click/deploy.sh -o /tmp/deploy.sh && chm
 
 ### 3.2 本地执行
 
-进入你想生成部署文件的目录，然后运行：
+在任意目录运行都可以，脚本会固定把部署文件和数据写到 `/opt/ai-api-stack`：
 
 ```bash
 bash one-click/deploy.sh
@@ -151,7 +152,7 @@ bash one-click/deploy.sh cert
 3. 在证书菜单中选择阿里云 DNS 签发。
 4. 输入主域名，例如 `774966.xyz`。
 5. 选择是否同时签发泛域名 `*.774966.xyz`。
-6. 将证书安装到 `generated-stack/nginx/certs/`。
+6. 将证书安装到 `/opt/ai-api-stack/nginx/certs/`。
 7. 部署公网 HTTPS 时填写生成的证书文件名。
 
 DNS 方式签发证书不依赖 Nginx 是否已经启动，所以可以先申请证书再部署项目。已经部署过也可以后补证书，然后通过 Nginx 管理菜单重载。
@@ -166,7 +167,7 @@ bash one-click/deploy.sh deploy
 
 按提示填写基础信息：
 
-- 生成目录：默认是当前目录下的 `generated-stack`
+- 安装目录：固定为 `/opt/ai-api-stack`
 - Compose 项目名：默认 `ai-api-stack`
 - 时区：默认 `Asia/Shanghai`
 - 是否加入外部 Docker 网络 `app-net`
@@ -178,27 +179,30 @@ bash one-click/deploy.sh deploy
 all
 1
 2
-12
+1234
 1 2
 1,2
-new-api nginx
+nginx new-api webui
 ```
 
 服务编号含义：
 
 ```text
-1 = new-api，自动带 PostgreSQL + Redis
-2 = cli-proxy-api
-3 = nginx
+1 = nginx
+2 = new-api，自动带 PostgreSQL + Redis
+3 = cli-proxy-api
+4 = gpt-image-2-webui
 ```
 
 常用选择：
 
 - `all`：部署全部服务
-- `1`：只部署 New API
-- `2`：只部署 CPA / CLIProxyAPI
-- `12`：部署 New API + CPA，不启用 Nginx
-- `3`、`13`、`23`、`123`：启用 Nginx 统一代理
+- `1`：启用 Nginx 统一代理，并拉起它代理的应用服务
+- `2`：只部署 New API
+- `3`：只部署 CPA / CLIProxyAPI
+- `4`：只部署 GPT Image WebUI
+- `23`：部署 New API + CPA，不启用 Nginx
+- `1234`：部署 Nginx + New API + CPA + GPT Image WebUI
 
 ### 4.4 局域网部署
 
@@ -216,6 +220,7 @@ new-api nginx
 ```text
 New API: http://服务器局域网IP:端口
 CPA:     http://服务器局域网IP:端口
+WebUI:   http://服务器局域网IP:端口
 ```
 
 ### 4.5 公网 HTTPS 部署
@@ -232,19 +237,22 @@ Nginx 部署模式: 2
 
 - New API 绑定域名，例如 `774966.xyz www.774966.xyz api.774966.xyz`
 - CPA 绑定域名，例如 `admin.774966.xyz`
+- GPT Image WebUI 绑定域名，例如 `image.774966.xyz`
 - 是否共用同一张证书
 - 证书文件名和私钥文件名
+
+如果此前通过证书菜单签发并安装过证书，部署 HTTPS 时会先询问是否直接复用上次生成的 `fullchain` 和私钥文件名。
 
 生成的 Nginx 配置文件在：
 
 ```text
-generated-stack/nginx/conf.d/default.conf
+/opt/ai-api-stack/nginx/conf.d/default.conf
 ```
 
 证书文件默认放在：
 
 ```text
-generated-stack/nginx/certs/
+/opt/ai-api-stack/nginx/certs/
 ```
 
 ### 4.6 更新服务
@@ -281,7 +289,7 @@ bash one-click/deploy.sh nginx
 - 查看 Nginx 状态
 - 查看 Nginx 日志
 
-修改 `generated-stack/nginx/conf.d/default.conf` 后，可以进入该菜单执行测试和重载。
+修改 `/opt/ai-api-stack/nginx/conf.d/default.conf` 后，可以进入该菜单执行测试和重载。
 
 ### 4.8 Docker 国内镜像源
 
@@ -337,14 +345,14 @@ bash one-click/deploy.sh uninstall
 docker compose down -v --remove-orphans
 ```
 
-然后询问是否删除生成目录和配置文件。
+然后询问是否删除安装目录和配置文件。
 
-## 5. 生成目录结构
+## 5. 安装目录结构
 
 部署后会生成：
 
 ```text
-generated-stack/
+/opt/ai-api-stack/
 ├── docker-compose.yml
 ├── .env
 ├── acme-reload-nginx.sh   # 证书菜单生成，可选
@@ -355,6 +363,9 @@ generated-stack/
 │   ├── auths/
 │   ├── logs/
 │   └── config.yaml
+├── gpt-image-2-webui/
+│   ├── generated-images/
+│   └── logs/
 └── nginx/
     ├── certs/
     └── conf.d/
@@ -365,8 +376,8 @@ generated-stack/
 
 - Debian 12 Docker 安装菜单只自动支持 Debian 12。
 - 配置 Docker 镜像源会修改 `/etc/docker/daemon.json`。
-- 选择 Nginx 后，New API 和 CPA 默认不暴露宿主机端口，只通过 Nginx 代理访问。
+- 选择 Nginx 后，New API、CPA 和 GPT Image WebUI 默认不暴露宿主机端口，只通过 Nginx 代理访问。
 - PostgreSQL 和 Redis 是 New API 的依赖，不需要在服务选择里单独选择。
 - `SESSION_SECRET` 和 `CRYPTO_SECRET` 是 New API 内部密钥，不是后台登录密码。
 - 阿里云 `Ali_Key` / `Ali_Secret` 不要公开，泄露后请立即禁用或轮换。
-- 公网 HTTPS 推荐使用泛域名证书，New API 和 CPA 可以共用同一张证书。
+- 公网 HTTPS 推荐使用泛域名证书，New API、CPA 和 GPT Image WebUI 可以共用同一张证书。

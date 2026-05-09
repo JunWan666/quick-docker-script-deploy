@@ -4,11 +4,7 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CURRENT_DIR="$(pwd)"
-if [[ -f "${CURRENT_DIR}/docker-compose.yml" && -d "${CURRENT_DIR}/nginx" && -d "${CURRENT_DIR}/cliproxyapi" ]]; then
-  DEFAULT_STACK_DIR="${CURRENT_DIR}"
-else
-  DEFAULT_STACK_DIR="${CURRENT_DIR}/generated-stack"
-fi
+DEFAULT_STACK_DIR="/opt/ai-api-stack"
 
 DOCKER_COMPOSE=()
 SELECTED_SERVICES=()
@@ -58,6 +54,21 @@ CLIPROXY_PORT_11451_VALUE="11451"
 CLIPROXY_REMOTE_SECRET_VALUE=""
 CLIPROXY_API_KEY_VALUE=""
 
+GPT_IMAGE_WEBUI_IMAGE_VALUE="tannic666/gpt-image-2-webui:latest"
+GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE=true
+GPT_IMAGE_WEBUI_HOST_PORT_VALUE="3001"
+GPT_IMAGE_WEBUI_OPENAI_API_KEY_VALUE=""
+GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL_VALUE=""
+GPT_IMAGE_WEBUI_OPENAI_IMAGE_TIMEOUT_MS_VALUE="1200000"
+GPT_IMAGE_WEBUI_STORAGE_MODE_VALUE="fs"
+GPT_IMAGE_WEBUI_APP_PASSWORD_VALUE=""
+GPT_IMAGE_WEBUI_CLEANUP_ENABLED_VALUE="true"
+GPT_IMAGE_WEBUI_RETENTION_DAYS_VALUE="3"
+GPT_IMAGE_WEBUI_CLEANUP_INTERVAL_HOURS_VALUE="24"
+GPT_IMAGE_WEBUI_CLEANUP_RUN_ON_START_VALUE="true"
+GPT_IMAGE_WEBUI_CLEANUP_DRY_RUN_VALUE="false"
+GPT_IMAGE_WEBUI_CLEANUP_LOG_FILE_VALUE="/app/logs/cleanup-generated-images.log"
+
 NGINX_IMAGE_VALUE="nginx:alpine"
 NGINX_DEPLOY_MODE_VALUE="lan"
 NGINX_ENABLE_HTTPS=false
@@ -67,15 +78,20 @@ NGINX_HTTP_PORT_VALUE="80"
 NGINX_HTTPS_PORT_VALUE="443"
 NGINX_LAN_API_PORT_VALUE="80"
 NGINX_LAN_ADMIN_PORT_VALUE="8080"
-NGINX_HTTP_SERVER_NAMES_VALUE="example.com www.example.com api.example.com admin.example.com"
+NGINX_LAN_WEBUI_PORT_VALUE="8081"
+NGINX_HTTP_SERVER_NAMES_VALUE="example.com www.example.com api.example.com admin.example.com image.example.com"
 NGINX_API_SERVER_NAMES_VALUE="example.com www.example.com api.example.com"
 NGINX_ADMIN_SERVER_NAME_VALUE="admin.example.com"
+NGINX_WEBUI_SERVER_NAMES_VALUE="image.example.com"
 NGINX_API_CERT_VALUE="fullchain.cer"
 NGINX_API_KEY_VALUE="example.com.key"
 NGINX_ADMIN_CERT_VALUE="fullchain.cer"
 NGINX_ADMIN_KEY_VALUE="example.com.key"
+NGINX_WEBUI_CERT_VALUE="fullchain.cer"
+NGINX_WEBUI_KEY_VALUE="example.com.key"
 NGINX_NEWAPI_UPSTREAM_VALUE="new-api:3000"
 NGINX_CLIPROXY_UPSTREAM_VALUE="cli-proxy-api:8317"
+NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE="gpt-image-2-webui:3000"
 
 die() {
   printf '错误：%s\n' "$*" >&2
@@ -181,7 +197,7 @@ banner() {
     banner_line '/_/ |_/___/   /_/ |_/_/  /___/   /___/\__/\_,_/\__/_/\_\'
   fi
   printf '%s\n' "$(color_text "${COLOR_BOLD}${COLOR_GREEN}" "AI API Stack 一键部署脚本")"
-  printf '%s\n' "$(color_text "$COLOR_DIM" "New API + CLIProxyAPI + Nginx + PostgreSQL + Redis")"
+  printf '%s\n' "$(color_text "$COLOR_DIM" "Nginx + New API + CLIProxyAPI + GPT Image WebUI + PostgreSQL + Redis")"
   printf '%s\n' "$(color_text "$COLOR_DIM" "Docker / 证书 / 部署 / 更新 / Nginx 管理 / 镜像源 / 杂项 / 卸载")"
   rule "=" 72
 }
@@ -381,6 +397,10 @@ resolve_publish_ports() {
     ensure_available_port CLIPROXY_PORT_11451_VALUE "CLIProxyAPI 11451 直连" 11451
   fi
 
+  if [[ "$GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+    ensure_available_port GPT_IMAGE_WEBUI_HOST_PORT_VALUE "GPT Image WebUI 直连" 3001 "$NEWAPI_HOST_PORT_VALUE"
+  fi
+
   if ! needs_nginx_config; then
     return
   fi
@@ -388,6 +408,7 @@ resolve_publish_ports() {
   if [[ "$NGINX_DEPLOY_MODE_VALUE" == "lan" ]]; then
     ensure_available_port NGINX_LAN_API_PORT_VALUE "Nginx 局域网 API 入口" 18080
     ensure_available_port NGINX_LAN_ADMIN_PORT_VALUE "Nginx 局域网管理端入口" 18081 "$NGINX_LAN_API_PORT_VALUE"
+    ensure_available_port NGINX_LAN_WEBUI_PORT_VALUE "Nginx 局域网 GPT Image WebUI 入口" 18082 "$NGINX_LAN_ADMIN_PORT_VALUE"
   else
     ensure_available_port NGINX_HTTP_PORT_VALUE "Nginx 公网 HTTP 入口" 18080
     if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
@@ -449,6 +470,29 @@ expand_path() {
       printf '%s' "$path"
       ;;
   esac
+}
+
+use_fixed_stack_dir() {
+  STACK_DIR="$(expand_path "$DEFAULT_STACK_DIR")"
+}
+
+show_stack_dir_notice() {
+  field_line "固定安装目录：" "$STACK_DIR"
+  subtle_note "脚本会始终在该目录生成和读取 docker-compose.yml、.env、Nginx 配置、证书和数据目录。"
+}
+
+ensure_stack_dir_writable() {
+  local parent=""
+
+  parent="$(dirname "$STACK_DIR")"
+
+  if [[ -d "$STACK_DIR" ]]; then
+    [[ -w "$STACK_DIR" ]] || die "部署目录不可写：$STACK_DIR。固定安装到 /opt 时通常需要使用 root 或 sudo 执行脚本。"
+    return
+  fi
+
+  [[ -d "$parent" ]] || die "父目录不存在：$parent"
+  [[ -w "$parent" ]] || die "无法在 $parent 下创建部署目录。固定安装到 /opt 时通常需要使用 root 或 sudo 执行脚本。"
 }
 
 join_list() {
@@ -543,6 +587,21 @@ load_existing_env_defaults() {
   load_env_default "$env_file" "CLIPROXY_REMOTE_SECRET" CLIPROXY_REMOTE_SECRET_VALUE
   load_env_default "$env_file" "CLIPROXY_API_KEY" CLIPROXY_API_KEY_VALUE
 
+  load_env_default "$env_file" "GPT_IMAGE_WEBUI_IMAGE" GPT_IMAGE_WEBUI_IMAGE_VALUE
+  load_env_default "$env_file" "GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT" GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE
+  load_env_default "$env_file" "GPT_IMAGE_WEBUI_HOST_PORT" GPT_IMAGE_WEBUI_HOST_PORT_VALUE
+  load_env_default "$env_file" "GPT_IMAGE_WEBUI_OPENAI_API_KEY" GPT_IMAGE_WEBUI_OPENAI_API_KEY_VALUE
+  load_env_default "$env_file" "GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL" GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL_VALUE
+  load_env_default "$env_file" "GPT_IMAGE_WEBUI_OPENAI_IMAGE_TIMEOUT_MS" GPT_IMAGE_WEBUI_OPENAI_IMAGE_TIMEOUT_MS_VALUE
+  load_env_default "$env_file" "GPT_IMAGE_WEBUI_STORAGE_MODE" GPT_IMAGE_WEBUI_STORAGE_MODE_VALUE
+  load_env_default "$env_file" "GPT_IMAGE_WEBUI_APP_PASSWORD" GPT_IMAGE_WEBUI_APP_PASSWORD_VALUE
+  load_env_default "$env_file" "GPT_IMAGE_WEBUI_CLEANUP_ENABLED" GPT_IMAGE_WEBUI_CLEANUP_ENABLED_VALUE
+  load_env_default "$env_file" "GPT_IMAGE_WEBUI_RETENTION_DAYS" GPT_IMAGE_WEBUI_RETENTION_DAYS_VALUE
+  load_env_default "$env_file" "GPT_IMAGE_WEBUI_CLEANUP_INTERVAL_HOURS" GPT_IMAGE_WEBUI_CLEANUP_INTERVAL_HOURS_VALUE
+  load_env_default "$env_file" "GPT_IMAGE_WEBUI_CLEANUP_RUN_ON_START" GPT_IMAGE_WEBUI_CLEANUP_RUN_ON_START_VALUE
+  load_env_default "$env_file" "GPT_IMAGE_WEBUI_CLEANUP_DRY_RUN" GPT_IMAGE_WEBUI_CLEANUP_DRY_RUN_VALUE
+  load_env_default "$env_file" "GPT_IMAGE_WEBUI_CLEANUP_LOG_FILE" GPT_IMAGE_WEBUI_CLEANUP_LOG_FILE_VALUE
+
   load_env_default "$env_file" "NGINX_IMAGE" NGINX_IMAGE_VALUE
   load_env_default "$env_file" "NGINX_DEPLOY_MODE" NGINX_DEPLOY_MODE_VALUE
   load_env_default "$env_file" "NGINX_ENABLE_HTTPS" NGINX_ENABLE_HTTPS
@@ -552,15 +611,20 @@ load_existing_env_defaults() {
   load_env_default "$env_file" "NGINX_HTTPS_PORT" NGINX_HTTPS_PORT_VALUE
   load_env_default "$env_file" "NGINX_LAN_API_PORT" NGINX_LAN_API_PORT_VALUE
   load_env_default "$env_file" "NGINX_LAN_ADMIN_PORT" NGINX_LAN_ADMIN_PORT_VALUE
+  load_env_default "$env_file" "NGINX_LAN_WEBUI_PORT" NGINX_LAN_WEBUI_PORT_VALUE
   load_env_default "$env_file" "NGINX_HTTP_SERVER_NAMES" NGINX_HTTP_SERVER_NAMES_VALUE
   load_env_default "$env_file" "NGINX_API_SERVER_NAMES" NGINX_API_SERVER_NAMES_VALUE
   load_env_default "$env_file" "NGINX_ADMIN_SERVER_NAME" NGINX_ADMIN_SERVER_NAME_VALUE
+  load_env_default "$env_file" "NGINX_WEBUI_SERVER_NAMES" NGINX_WEBUI_SERVER_NAMES_VALUE
   load_env_default "$env_file" "NGINX_API_CERT" NGINX_API_CERT_VALUE
   load_env_default "$env_file" "NGINX_API_KEY" NGINX_API_KEY_VALUE
   load_env_default "$env_file" "NGINX_ADMIN_CERT" NGINX_ADMIN_CERT_VALUE
   load_env_default "$env_file" "NGINX_ADMIN_KEY" NGINX_ADMIN_KEY_VALUE
+  load_env_default "$env_file" "NGINX_WEBUI_CERT" NGINX_WEBUI_CERT_VALUE
+  load_env_default "$env_file" "NGINX_WEBUI_KEY" NGINX_WEBUI_KEY_VALUE
   load_env_default "$env_file" "NGINX_NEWAPI_UPSTREAM" NGINX_NEWAPI_UPSTREAM_VALUE
   load_env_default "$env_file" "NGINX_CLIPROXY_UPSTREAM" NGINX_CLIPROXY_UPSTREAM_VALUE
+  load_env_default "$env_file" "NGINX_GPT_IMAGE_WEBUI_UPSTREAM" NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE
 }
 
 first_word() {
@@ -619,17 +683,20 @@ service_from_token() {
   token="$(lower "$1")"
 
   case "$token" in
-    1|newapi|new-api|api)
+    1|nginx|proxy|gateway)
+      printf 'nginx'
+      ;;
+    2|newapi|new-api|api)
       printf 'new-api'
       ;;
     postgres|postgresql|pg|db|redis|cache)
       printf 'new-api'
       ;;
-    2|cliproxy|cliproxyapi|cli-proxy-api|cli|cpa)
+    3|cliproxy|cliproxyapi|cli-proxy-api|cli|cpa)
       printf 'cli-proxy-api'
       ;;
-    3|nginx|proxy|gateway)
-      printf 'nginx'
+    4|gpt-image-2-webui|gpt-image-webui|gptimage|gpt-image|image-webui|webui|image)
+      printf 'gpt-image-2-webui'
       ;;
     *)
       return 1
@@ -651,11 +718,12 @@ select_services() {
   local service=""
 
   section_title "服务选择"
-  menu_option "$COLOR_GREEN" " 1)" "new-api"
-  menu_option "$COLOR_GREEN" " 2)" "cli-proxy-api"
-  menu_option "$COLOR_GREEN" " 3)" "nginx"
+  menu_option "$COLOR_GREEN" " 1)" "nginx"
+  menu_option "$COLOR_GREEN" " 2)" "new-api"
+  menu_option "$COLOR_GREEN" " 3)" "cli-proxy-api"
+  menu_option "$COLOR_GREEN" " 4)" "gpt-image-2-webui"
   subtle_note "postgres 和 redis 是 new-api 的内置依赖，不单独选择。"
-  subtle_note "输入 all、12、1 2、1,2 或服务名都可以；选 3 会启用 Nginx。"
+  subtle_note "输入 all、1234、1 2、1,2 或服务名都可以；选 1 会启用 Nginx。"
 
   while true; do
     read_line raw "要部署的服务" "all"
@@ -674,7 +742,7 @@ select_services() {
     SELECTED_SERVICES=()
 
     for token in $raw; do
-      if [[ "$token" =~ ^[123]+$ && "${#token}" -gt 1 ]]; then
+      if [[ "$token" =~ ^[1234]+$ && "${#token}" -gt 1 ]]; then
         local index=0
         local char=""
         for ((index = 0; index < ${#token}; index++)); do
@@ -716,14 +784,94 @@ needs_cliproxy_config() {
   return 1
 }
 
+needs_gpt_image_webui_config() {
+  selected_or_all "gpt-image-2-webui" && return 0
+  selected_or_all "nginx" && return 0
+  return 1
+}
+
 needs_nginx_config() {
   selected_or_all "nginx"
 }
 
+last_certificate_metadata_file() {
+  printf '%s' "$STACK_DIR/nginx/certs/.last-cert.env"
+}
+
+write_last_certificate_metadata() {
+  local base_domain="$1"
+  local cert_file="$2"
+  local key_file="$3"
+  local include_wildcard="$4"
+  local metadata_file=""
+
+  metadata_file="$(last_certificate_metadata_file)"
+  mkdir -p "$(dirname "$metadata_file")"
+  {
+    write_env_line "ACME_BASE_DOMAIN" "$base_domain"
+    write_env_line "ACME_CERT_FILE" "$cert_file"
+    write_env_line "ACME_KEY_FILE" "$key_file"
+    write_env_line "ACME_INCLUDE_WILDCARD" "$include_wildcard"
+    write_env_line "ACME_UPDATED_AT" "$(date +%Y-%m-%dT%H:%M:%S%z)"
+  } > "$metadata_file"
+}
+
+load_last_certificate_pair() {
+  local __cert_var="$1"
+  local __key_var="$2"
+  local __domain_var="$3"
+  local metadata_file=""
+  local cert_file=""
+  local key_file=""
+  local base_domain=""
+
+  metadata_file="$(last_certificate_metadata_file)"
+  [[ -f "$metadata_file" ]] || return 1
+
+  cert_file="$(dotenv_get "$metadata_file" "ACME_CERT_FILE" || true)"
+  key_file="$(dotenv_get "$metadata_file" "ACME_KEY_FILE" || true)"
+  base_domain="$(dotenv_get "$metadata_file" "ACME_BASE_DOMAIN" || true)"
+
+  [[ -n "$cert_file" && -n "$key_file" ]] || return 1
+  [[ "$cert_file" != /* && "$cert_file" != *".."* ]] || return 1
+  [[ "$key_file" != /* && "$key_file" != *".."* ]] || return 1
+  [[ -f "$STACK_DIR/nginx/certs/$cert_file" ]] || return 1
+  [[ -f "$STACK_DIR/nginx/certs/$key_file" ]] || return 1
+
+  printf -v "$__cert_var" '%s' "$cert_file"
+  printf -v "$__key_var" '%s' "$key_file"
+  printf -v "$__domain_var" '%s' "$base_domain"
+}
+
 read_nginx_certificate_files() {
   local share_cert="$NGINX_SHARE_CERT_VALUE"
+  local last_cert=""
+  local last_key=""
+  local last_domain=""
+  local use_last_cert="true"
 
-  read_yes_no share_cert "New API 和 CPA 是否共用同一个证书" "$NGINX_SHARE_CERT_VALUE"
+  if load_last_certificate_pair last_cert last_key last_domain; then
+    subtle_note "检测到上次签发并安装的证书，可直接用于本次 Nginx HTTPS 配置。"
+    if [[ -n "$last_domain" ]]; then
+      field_line "证书域名：" "$last_domain"
+    fi
+    field_line "证书文件：" "$last_cert"
+    field_line "私钥文件：" "$last_key"
+    read_yes_no use_last_cert "是否直接用于所有 Nginx HTTPS 站点" "$use_last_cert"
+    if [[ "$use_last_cert" == "true" ]]; then
+      NGINX_SHARE_CERT_VALUE=true
+      NGINX_API_CERT_VALUE="$last_cert"
+      NGINX_API_KEY_VALUE="$last_key"
+      NGINX_ADMIN_CERT_VALUE="$last_cert"
+      NGINX_ADMIN_KEY_VALUE="$last_key"
+      NGINX_WEBUI_CERT_VALUE="$last_cert"
+      NGINX_WEBUI_KEY_VALUE="$last_key"
+      printf '已设置：所有 Nginx HTTPS 站点共用证书 %s / %s。\n' "$last_cert" "$last_key"
+      return
+    fi
+  fi
+
+  read_yes_no share_cert "New API、CPA 和 GPT Image WebUI 是否共用同一个证书" "$NGINX_SHARE_CERT_VALUE"
   NGINX_SHARE_CERT_VALUE="$share_cert"
 
   if [[ "$NGINX_SHARE_CERT_VALUE" == "true" ]]; then
@@ -731,7 +879,9 @@ read_nginx_certificate_files() {
     read_line NGINX_API_KEY_VALUE "nginx/certs 里的私钥文件名" "$NGINX_API_KEY_VALUE"
     NGINX_ADMIN_CERT_VALUE="$NGINX_API_CERT_VALUE"
     NGINX_ADMIN_KEY_VALUE="$NGINX_API_KEY_VALUE"
-    printf '已设置：New API 和 CPA 共用证书 %s / %s。\n' "$NGINX_API_CERT_VALUE" "$NGINX_API_KEY_VALUE"
+    NGINX_WEBUI_CERT_VALUE="$NGINX_API_CERT_VALUE"
+    NGINX_WEBUI_KEY_VALUE="$NGINX_API_KEY_VALUE"
+    printf '已设置：New API、CPA 和 GPT Image WebUI 共用证书 %s / %s。\n' "$NGINX_API_CERT_VALUE" "$NGINX_API_KEY_VALUE"
     return
   fi
 
@@ -739,10 +889,18 @@ read_nginx_certificate_files() {
   read_line NGINX_API_KEY_VALUE "nginx/certs 里的 New API 私钥文件名" "$NGINX_API_KEY_VALUE"
   read_line NGINX_ADMIN_CERT_VALUE "nginx/certs 里的 CPA 证书文件名" "$NGINX_ADMIN_CERT_VALUE"
   read_line NGINX_ADMIN_KEY_VALUE "nginx/certs 里的 CPA 私钥文件名" "$NGINX_ADMIN_KEY_VALUE"
+  read_line NGINX_WEBUI_CERT_VALUE "nginx/certs 里的 GPT Image WebUI 证书文件名" "$NGINX_WEBUI_CERT_VALUE"
+  read_line NGINX_WEBUI_KEY_VALUE "nginx/certs 里的 GPT Image WebUI 私钥文件名" "$NGINX_WEBUI_KEY_VALUE"
 }
 
 uses_nginx_frontend() {
   selected_or_all "nginx"
+}
+
+default_gpt_image_webui_base_url() {
+  if needs_newapi_config; then
+    printf 'http://new-api:3000/v1'
+  fi
 }
 
 try_detect_compose() {
@@ -1044,8 +1202,8 @@ compose_stack() {
 prepare_existing_stack() {
   local label="$1"
 
-  read_line STACK_DIR "$label" "$DEFAULT_STACK_DIR"
-  STACK_DIR="$(expand_path "$STACK_DIR")"
+  use_fixed_stack_dir
+  field_line "$label：" "$STACK_DIR"
 
   [[ -f "$STACK_DIR/docker-compose.yml" ]] || die "未找到 Compose 文件：$STACK_DIR/docker-compose.yml"
 
@@ -1057,14 +1215,17 @@ service_from_compose_token() {
   local token="$(lower "$1")"
 
   case "$token" in
-    1|new-api|newapi|api)
+    1|nginx|proxy|gateway)
+      printf 'nginx'
+      ;;
+    2|new-api|newapi|api)
       printf 'new-api'
       ;;
-    2|cli-proxy-api|cliproxy-api|cliproxy|cpa|admin)
+    3|cli-proxy-api|cliproxy-api|cliproxy|cpa|admin)
       printf 'cli-proxy-api'
       ;;
-    3|nginx|proxy|gateway)
-      printf 'nginx'
+    4|gpt-image-2-webui|gpt-image-webui|gptimage|gpt-image|image-webui|webui|image)
+      printf 'gpt-image-2-webui'
       ;;
     postgres|postgresql|pg|db|database)
       printf 'postgres'
@@ -1092,7 +1253,7 @@ select_compose_targets() {
   local service=""
 
   COMPOSE_TARGETS=()
-  subtle_note "输入 all 表示全部；也可以输入 12、1 2、1,2、nginx、postgres、redis。"
+  subtle_note "输入 all 表示全部；也可以输入 1234、1 2、1,2、nginx、webui、postgres、redis。"
 
   while true; do
     read_line raw "请选择要操作的服务" "all"
@@ -1108,7 +1269,7 @@ select_compose_targets() {
 
     COMPOSE_TARGETS=()
     for token in $raw; do
-      if [[ "$token" =~ ^[123]+$ && "${#token}" -gt 1 ]]; then
+      if [[ "$token" =~ ^[1234]+$ && "${#token}" -gt 1 ]]; then
         local index=0
         local char=""
         for ((index = 0; index < ${#token}; index++)); do
@@ -1143,8 +1304,9 @@ collect_answers() {
   CLIPROXY_API_KEY_VALUE="$(random_hex 32)"
 
   section_title "基础设置"
-  read_line STACK_DIR "生成目录" "$DEFAULT_STACK_DIR"
-  STACK_DIR="$(expand_path "$STACK_DIR")"
+  use_fixed_stack_dir
+  show_stack_dir_notice
+  ensure_stack_dir_writable
   load_existing_env_defaults
   read_line PROJECT_NAME_VALUE "Compose 项目名" "$PROJECT_NAME_VALUE"
   read_line TZ_VALUE "时区" "$TZ_VALUE"
@@ -1249,6 +1411,54 @@ collect_answers() {
     fi
   fi
 
+  if needs_gpt_image_webui_config; then
+    if [[ -z "$GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL_VALUE" ]]; then
+      GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL_VALUE="$(default_gpt_image_webui_base_url)"
+    fi
+
+    if [[ "$ADVANCED_CONFIG_VALUE" == "true" ]]; then
+      section_title "GPT Image WebUI 配置"
+      read_line GPT_IMAGE_WEBUI_IMAGE_VALUE "GPT Image WebUI 镜像" "$GPT_IMAGE_WEBUI_IMAGE_VALUE"
+      read_line GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL_VALUE "默认 OpenAI 兼容 Base URL（可留空）" "$GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL_VALUE"
+      read_line GPT_IMAGE_WEBUI_OPENAI_API_KEY_VALUE "默认 OpenAI API Key（可留空，明文）" "$GPT_IMAGE_WEBUI_OPENAI_API_KEY_VALUE"
+      read_line GPT_IMAGE_WEBUI_OPENAI_IMAGE_TIMEOUT_MS_VALUE "图片请求超时时间 ms" "$GPT_IMAGE_WEBUI_OPENAI_IMAGE_TIMEOUT_MS_VALUE"
+      read_line GPT_IMAGE_WEBUI_STORAGE_MODE_VALUE "图片存储模式 fs/indexeddb" "$GPT_IMAGE_WEBUI_STORAGE_MODE_VALUE"
+      read_line GPT_IMAGE_WEBUI_APP_PASSWORD_VALUE "访问密码（可留空，明文）" "$GPT_IMAGE_WEBUI_APP_PASSWORD_VALUE"
+      read_yes_no GPT_IMAGE_WEBUI_CLEANUP_ENABLED_VALUE "是否启用生成图片自动清理" "$GPT_IMAGE_WEBUI_CLEANUP_ENABLED_VALUE"
+      if [[ "$GPT_IMAGE_WEBUI_CLEANUP_ENABLED_VALUE" == "true" ]]; then
+        read_line GPT_IMAGE_WEBUI_RETENTION_DAYS_VALUE "生成图片保留天数" "$GPT_IMAGE_WEBUI_RETENTION_DAYS_VALUE"
+        read_line GPT_IMAGE_WEBUI_CLEANUP_INTERVAL_HOURS_VALUE "自动清理间隔小时" "$GPT_IMAGE_WEBUI_CLEANUP_INTERVAL_HOURS_VALUE"
+        read_yes_no GPT_IMAGE_WEBUI_CLEANUP_RUN_ON_START_VALUE "容器启动时是否先清理一次" "$GPT_IMAGE_WEBUI_CLEANUP_RUN_ON_START_VALUE"
+        read_yes_no GPT_IMAGE_WEBUI_CLEANUP_DRY_RUN_VALUE "是否只试运行清理" "$GPT_IMAGE_WEBUI_CLEANUP_DRY_RUN_VALUE"
+      fi
+      if uses_nginx_frontend; then
+        GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE=false
+        printf '已选择 Nginx，GPT Image WebUI 默认不映射宿主机端口，只通过 Nginx 访问。\n'
+      else
+        read_yes_no GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE "是否开放 GPT Image WebUI 直连端口" "$GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE"
+      fi
+      if [[ "$GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+        read_line GPT_IMAGE_WEBUI_HOST_PORT_VALUE "GPT Image WebUI 主机端口" "$GPT_IMAGE_WEBUI_HOST_PORT_VALUE"
+      fi
+    else
+      GPT_IMAGE_WEBUI_IMAGE_VALUE="tannic666/gpt-image-2-webui:latest"
+      GPT_IMAGE_WEBUI_OPENAI_IMAGE_TIMEOUT_MS_VALUE="1200000"
+      GPT_IMAGE_WEBUI_STORAGE_MODE_VALUE="fs"
+      GPT_IMAGE_WEBUI_CLEANUP_ENABLED_VALUE="true"
+      GPT_IMAGE_WEBUI_RETENTION_DAYS_VALUE="3"
+      GPT_IMAGE_WEBUI_CLEANUP_INTERVAL_HOURS_VALUE="24"
+      GPT_IMAGE_WEBUI_CLEANUP_RUN_ON_START_VALUE="true"
+      GPT_IMAGE_WEBUI_CLEANUP_DRY_RUN_VALUE="false"
+      GPT_IMAGE_WEBUI_CLEANUP_LOG_FILE_VALUE="/app/logs/cleanup-generated-images.log"
+      if uses_nginx_frontend; then
+        GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE=false
+        printf '已选择 Nginx，GPT Image WebUI 默认只通过 Nginx 访问。\n'
+      else
+        GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE=true
+      fi
+    fi
+  fi
+
   if needs_nginx_config; then
     section_title "Nginx 配置"
     if [[ "$ADVANCED_CONFIG_VALUE" == "true" ]]; then
@@ -1265,6 +1475,13 @@ collect_answers() {
           fi
           printf 'API 入口端口和管理端端口不能相同，请重新输入。\n'
         done
+        while true; do
+          read_line NGINX_LAN_WEBUI_PORT_VALUE "局域网 GPT Image WebUI 入口主机端口" "$NGINX_LAN_WEBUI_PORT_VALUE"
+          if [[ "$NGINX_LAN_WEBUI_PORT_VALUE" != "$NGINX_LAN_API_PORT_VALUE" && "$NGINX_LAN_WEBUI_PORT_VALUE" != "$NGINX_LAN_ADMIN_PORT_VALUE" ]]; then
+            break
+          fi
+          printf 'WebUI 入口端口不能和 API / 管理端端口相同，请重新输入。\n'
+        done
       else
         read_yes_no https_enabled "是否启用 Nginx HTTPS 配置" "$NGINX_ENABLE_HTTPS"
         NGINX_ENABLE_HTTPS="$https_enabled"
@@ -1279,13 +1496,15 @@ collect_answers() {
         fi
         read_line NGINX_API_SERVER_NAMES_VALUE "New API 绑定域名（多个空格分隔）" "$NGINX_API_SERVER_NAMES_VALUE"
         read_line NGINX_ADMIN_SERVER_NAME_VALUE "CLIProxyAPI 绑定域名（多个空格分隔）" "$NGINX_ADMIN_SERVER_NAME_VALUE"
-        NGINX_HTTP_SERVER_NAMES_VALUE="${NGINX_API_SERVER_NAMES_VALUE} ${NGINX_ADMIN_SERVER_NAME_VALUE}"
+        read_line NGINX_WEBUI_SERVER_NAMES_VALUE "GPT Image WebUI 绑定域名（多个空格分隔）" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
+        NGINX_HTTP_SERVER_NAMES_VALUE="${NGINX_API_SERVER_NAMES_VALUE} ${NGINX_ADMIN_SERVER_NAME_VALUE} ${NGINX_WEBUI_SERVER_NAMES_VALUE}"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           read_nginx_certificate_files
         fi
         read_line NGINX_NEWAPI_UPSTREAM_VALUE "New API 上游地址" "$NGINX_NEWAPI_UPSTREAM_VALUE"
         read_line NGINX_CLIPROXY_UPSTREAM_VALUE "CLIProxyAPI 上游地址" "$NGINX_CLIPROXY_UPSTREAM_VALUE"
-        printf '已绑定：New API -> %s；CLIProxyAPI -> %s。\n' "$NGINX_API_SERVER_NAMES_VALUE" "$NGINX_ADMIN_SERVER_NAME_VALUE"
+        read_line NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE "GPT Image WebUI 上游地址" "$NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE"
+        printf '已绑定：New API -> %s；CLIProxyAPI -> %s；GPT Image WebUI -> %s。\n' "$NGINX_API_SERVER_NAMES_VALUE" "$NGINX_ADMIN_SERVER_NAME_VALUE" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           if [[ "$NGINX_HTTP_TO_HTTPS_REDIRECT_VALUE" == "true" ]]; then
             printf 'HTTP 80 会 301 跳转到 HTTPS 端口 %s。\n' "$NGINX_HTTPS_PORT_VALUE"
@@ -1312,15 +1531,17 @@ collect_answers() {
       if [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" ]]; then
         read_line NGINX_API_SERVER_NAMES_VALUE "New API 绑定域名（多个空格分隔）" "$NGINX_API_SERVER_NAMES_VALUE"
         read_line NGINX_ADMIN_SERVER_NAME_VALUE "CLIProxyAPI 绑定域名（多个空格分隔）" "$NGINX_ADMIN_SERVER_NAME_VALUE"
-        NGINX_HTTP_SERVER_NAMES_VALUE="${NGINX_API_SERVER_NAMES_VALUE} ${NGINX_ADMIN_SERVER_NAME_VALUE}"
+        read_line NGINX_WEBUI_SERVER_NAMES_VALUE "GPT Image WebUI 绑定域名（多个空格分隔）" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
+        NGINX_HTTP_SERVER_NAMES_VALUE="${NGINX_API_SERVER_NAMES_VALUE} ${NGINX_ADMIN_SERVER_NAME_VALUE} ${NGINX_WEBUI_SERVER_NAMES_VALUE}"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           read_nginx_certificate_files
         fi
       fi
       NGINX_NEWAPI_UPSTREAM_VALUE="new-api:3000"
       NGINX_CLIPROXY_UPSTREAM_VALUE="cli-proxy-api:8317"
+      NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE="gpt-image-2-webui:3000"
       if [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" ]]; then
-        printf '已绑定：New API -> %s；CLIProxyAPI -> %s。\n' "$NGINX_API_SERVER_NAMES_VALUE" "$NGINX_ADMIN_SERVER_NAME_VALUE"
+        printf '已绑定：New API -> %s；CLIProxyAPI -> %s；GPT Image WebUI -> %s。\n' "$NGINX_API_SERVER_NAMES_VALUE" "$NGINX_ADMIN_SERVER_NAME_VALUE" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           if [[ "$NGINX_HTTP_TO_HTTPS_REDIRECT_VALUE" == "true" ]]; then
             printf 'HTTP 80 会 301 跳转到 HTTPS 端口 %s。\n' "$NGINX_HTTPS_PORT_VALUE"
@@ -1360,6 +1581,8 @@ prepare_directories() {
   mkdir -p "$STACK_DIR/new-api/logs"
   mkdir -p "$STACK_DIR/cliproxyapi/auths"
   mkdir -p "$STACK_DIR/cliproxyapi/logs"
+  mkdir -p "$STACK_DIR/gpt-image-2-webui/generated-images"
+  mkdir -p "$STACK_DIR/gpt-image-2-webui/logs"
   mkdir -p "$STACK_DIR/nginx/conf.d"
   mkdir -p "$STACK_DIR/nginx/certs"
 }
@@ -1396,6 +1619,20 @@ write_env_file() {
     write_env_line "CLIPROXY_PORT_54545" "$CLIPROXY_PORT_54545_VALUE"
     write_env_line "CLIPROXY_PORT_51121" "$CLIPROXY_PORT_51121_VALUE"
     write_env_line "CLIPROXY_PORT_11451" "$CLIPROXY_PORT_11451_VALUE"
+    write_env_line "GPT_IMAGE_WEBUI_IMAGE" "$GPT_IMAGE_WEBUI_IMAGE_VALUE"
+    write_env_line "GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT" "$GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE"
+    write_env_line "GPT_IMAGE_WEBUI_HOST_PORT" "$GPT_IMAGE_WEBUI_HOST_PORT_VALUE"
+    write_env_line "GPT_IMAGE_WEBUI_OPENAI_API_KEY" "$GPT_IMAGE_WEBUI_OPENAI_API_KEY_VALUE"
+    write_env_line "GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL" "$GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL_VALUE"
+    write_env_line "GPT_IMAGE_WEBUI_OPENAI_IMAGE_TIMEOUT_MS" "$GPT_IMAGE_WEBUI_OPENAI_IMAGE_TIMEOUT_MS_VALUE"
+    write_env_line "GPT_IMAGE_WEBUI_STORAGE_MODE" "$GPT_IMAGE_WEBUI_STORAGE_MODE_VALUE"
+    write_env_line "GPT_IMAGE_WEBUI_APP_PASSWORD" "$GPT_IMAGE_WEBUI_APP_PASSWORD_VALUE"
+    write_env_line "GPT_IMAGE_WEBUI_CLEANUP_ENABLED" "$GPT_IMAGE_WEBUI_CLEANUP_ENABLED_VALUE"
+    write_env_line "GPT_IMAGE_WEBUI_RETENTION_DAYS" "$GPT_IMAGE_WEBUI_RETENTION_DAYS_VALUE"
+    write_env_line "GPT_IMAGE_WEBUI_CLEANUP_INTERVAL_HOURS" "$GPT_IMAGE_WEBUI_CLEANUP_INTERVAL_HOURS_VALUE"
+    write_env_line "GPT_IMAGE_WEBUI_CLEANUP_RUN_ON_START" "$GPT_IMAGE_WEBUI_CLEANUP_RUN_ON_START_VALUE"
+    write_env_line "GPT_IMAGE_WEBUI_CLEANUP_DRY_RUN" "$GPT_IMAGE_WEBUI_CLEANUP_DRY_RUN_VALUE"
+    write_env_line "GPT_IMAGE_WEBUI_CLEANUP_LOG_FILE" "$GPT_IMAGE_WEBUI_CLEANUP_LOG_FILE_VALUE"
     write_env_line "NGINX_IMAGE" "$NGINX_IMAGE_VALUE"
     write_env_line "NGINX_DEPLOY_MODE" "$NGINX_DEPLOY_MODE_VALUE"
     write_env_line "NGINX_ENABLE_HTTPS" "$NGINX_ENABLE_HTTPS"
@@ -1405,15 +1642,20 @@ write_env_file() {
     write_env_line "NGINX_HTTPS_PORT" "$NGINX_HTTPS_PORT_VALUE"
     write_env_line "NGINX_LAN_API_PORT" "$NGINX_LAN_API_PORT_VALUE"
     write_env_line "NGINX_LAN_ADMIN_PORT" "$NGINX_LAN_ADMIN_PORT_VALUE"
+    write_env_line "NGINX_LAN_WEBUI_PORT" "$NGINX_LAN_WEBUI_PORT_VALUE"
     write_env_line "NGINX_HTTP_SERVER_NAMES" "$NGINX_HTTP_SERVER_NAMES_VALUE"
     write_env_line "NGINX_API_SERVER_NAMES" "$NGINX_API_SERVER_NAMES_VALUE"
     write_env_line "NGINX_ADMIN_SERVER_NAME" "$NGINX_ADMIN_SERVER_NAME_VALUE"
+    write_env_line "NGINX_WEBUI_SERVER_NAMES" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
     write_env_line "NGINX_API_CERT" "$NGINX_API_CERT_VALUE"
     write_env_line "NGINX_API_KEY" "$NGINX_API_KEY_VALUE"
     write_env_line "NGINX_ADMIN_CERT" "$NGINX_ADMIN_CERT_VALUE"
     write_env_line "NGINX_ADMIN_KEY" "$NGINX_ADMIN_KEY_VALUE"
+    write_env_line "NGINX_WEBUI_CERT" "$NGINX_WEBUI_CERT_VALUE"
+    write_env_line "NGINX_WEBUI_KEY" "$NGINX_WEBUI_KEY_VALUE"
     write_env_line "NGINX_NEWAPI_UPSTREAM" "$NGINX_NEWAPI_UPSTREAM_VALUE"
     write_env_line "NGINX_CLIPROXY_UPSTREAM" "$NGINX_CLIPROXY_UPSTREAM_VALUE"
+    write_env_line "NGINX_GPT_IMAGE_WEBUI_UPSTREAM" "$NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE"
   } > "$env_file"
 }
 
@@ -1513,6 +1755,27 @@ server {
         proxy_set_header Connection \$connection_upgrade;
     }
 }
+
+# 3. GPT Image WebUI
+server {
+    listen 8081 default_server;
+    server_name _;
+
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass http://${NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}
 NGINX
     return
   fi
@@ -1591,6 +1854,35 @@ server {
         proxy_set_header Connection \$connection_upgrade;
     }
 }
+
+# 3. GPT Image WebUI
+server {
+    listen 443 ssl;
+    server_name ${NGINX_WEBUI_SERVER_NAMES_VALUE};
+
+    ssl_certificate      /etc/nginx/certs/${NGINX_WEBUI_CERT_VALUE};
+    ssl_certificate_key  /etc/nginx/certs/${NGINX_WEBUI_KEY_VALUE};
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass http://${NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}
+
 NGINX
       else
         cat > "$active_conf" <<NGINX
@@ -1664,6 +1956,34 @@ server {
         proxy_set_header Connection \$connection_upgrade;
     }
 }
+
+# 3. GPT Image WebUI
+server {
+    listen 443 ssl;
+    server_name ${NGINX_WEBUI_SERVER_NAMES_VALUE};
+
+    ssl_certificate      /etc/nginx/certs/${NGINX_WEBUI_CERT_VALUE};
+    ssl_certificate_key  /etc/nginx/certs/${NGINX_WEBUI_KEY_VALUE};
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass http://${NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}
 NGINX
       fi
     else
@@ -1717,7 +2037,28 @@ server {
     }
 }
 
-# 3. API 服务 (New API) - HTTPS
+# 3. GPT Image WebUI - HTTP
+server {
+    listen 80;
+    server_name ${NGINX_WEBUI_SERVER_NAMES_VALUE};
+
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass http://${NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}
+
+# 4. API 服务 (New API) - HTTPS
 server {
     listen 443 ssl;
     server_name ${NGINX_API_SERVER_NAMES_VALUE};
@@ -1745,7 +2086,7 @@ server {
     }
 }
 
-# 4. 管理后台 (CPA / CLIProxyAPI) - HTTPS
+# 5. 管理后台 (CPA / CLIProxyAPI) - HTTPS
 server {
     listen 443 ssl;
     server_name ${NGINX_ADMIN_SERVER_NAME_VALUE};
@@ -1771,6 +2112,34 @@ server {
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection \$connection_upgrade;
+    }
+}
+
+# 6. GPT Image WebUI - HTTPS
+server {
+    listen 443 ssl;
+    server_name ${NGINX_WEBUI_SERVER_NAMES_VALUE};
+
+    ssl_certificate      /etc/nginx/certs/${NGINX_WEBUI_CERT_VALUE};
+    ssl_certificate_key  /etc/nginx/certs/${NGINX_WEBUI_KEY_VALUE};
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass http://${NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
     }
 }
 NGINX
@@ -1827,6 +2196,27 @@ server {
         proxy_set_header Connection \$connection_upgrade;
     }
 }
+
+# 3. GPT Image WebUI
+server {
+    listen 80;
+    server_name ${NGINX_WEBUI_SERVER_NAMES_VALUE};
+
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass http://${NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}
 NGINX
 }
 
@@ -1840,6 +2230,7 @@ validate_nginx_certificates() {
   certs+=("$NGINX_API_CERT_VALUE" "$NGINX_API_KEY_VALUE")
   if [[ "$NGINX_SHARE_CERT_VALUE" != "true" ]]; then
     certs+=("$NGINX_ADMIN_CERT_VALUE" "$NGINX_ADMIN_KEY_VALUE")
+    certs+=("$NGINX_WEBUI_CERT_VALUE" "$NGINX_WEBUI_KEY_VALUE")
   fi
 
   for file in "${certs[@]}"; do
@@ -1961,6 +2352,38 @@ YAML
     networks:
       - public-net
 
+  gpt-image-2-webui:
+    image: "${GPT_IMAGE_WEBUI_IMAGE:-tannic666/gpt-image-2-webui:latest}"
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      OPENAI_API_KEY: "${GPT_IMAGE_WEBUI_OPENAI_API_KEY:-}"
+      OPENAI_API_BASE_URL: "${GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL:-}"
+      OPENAI_IMAGE_TIMEOUT_MS: "${GPT_IMAGE_WEBUI_OPENAI_IMAGE_TIMEOUT_MS:-1200000}"
+      NEXT_PUBLIC_IMAGE_STORAGE_MODE: "${GPT_IMAGE_WEBUI_STORAGE_MODE:-fs}"
+      APP_PASSWORD: "${GPT_IMAGE_WEBUI_APP_PASSWORD:-}"
+      GENERATED_IMAGE_CLEANUP_ENABLED: "${GPT_IMAGE_WEBUI_CLEANUP_ENABLED:-true}"
+      GENERATED_IMAGE_RETENTION_DAYS: "${GPT_IMAGE_WEBUI_RETENTION_DAYS:-3}"
+      GENERATED_IMAGE_CLEANUP_INTERVAL_HOURS: "${GPT_IMAGE_WEBUI_CLEANUP_INTERVAL_HOURS:-24}"
+      GENERATED_IMAGE_CLEANUP_RUN_ON_START: "${GPT_IMAGE_WEBUI_CLEANUP_RUN_ON_START:-true}"
+      GENERATED_IMAGE_CLEANUP_DRY_RUN: "${GPT_IMAGE_WEBUI_CLEANUP_DRY_RUN:-false}"
+      GENERATED_IMAGE_CLEANUP_LOG_FILE: "${GPT_IMAGE_WEBUI_CLEANUP_LOG_FILE:-/app/logs/cleanup-generated-images.log}"
+YAML
+
+  if [[ "$GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+    cat >> "$compose_file" <<'YAML'
+    ports:
+      - "${GPT_IMAGE_WEBUI_HOST_PORT:-3001}:3000"
+YAML
+  fi
+
+  cat >> "$compose_file" <<'YAML'
+    volumes:
+      - ./gpt-image-2-webui/generated-images:/app/generated-images
+      - ./gpt-image-2-webui/logs:/app/logs
+    networks:
+      - public-net
+
   nginx:
     image: "${NGINX_IMAGE:-nginx:alpine}"
     restart: unless-stopped
@@ -1971,6 +2394,7 @@ YAML
     cat >> "$compose_file" <<'YAML'
       - "${NGINX_LAN_API_PORT:-80}:80"
       - "${NGINX_LAN_ADMIN_PORT:-8080}:8080"
+      - "${NGINX_LAN_WEBUI_PORT:-8081}:8081"
 YAML
   else
     cat >> "$compose_file" <<'YAML'
@@ -1999,6 +2423,7 @@ YAML
     depends_on:
       - new-api
       - cli-proxy-api
+      - gpt-image-2-webui
     networks:
       - public-net
 
@@ -2094,36 +2519,44 @@ print_summary() {
   local lan_ip=""
   local api_primary=""
   local admin_primary=""
+  local webui_primary=""
   local newapi_url=""
   local cliproxy_url=""
+  local webui_url=""
 
   lan_ip="$(detect_lan_ip)"
   api_primary="$(first_word "$NGINX_API_SERVER_NAMES_VALUE")"
   admin_primary="$(first_word "$NGINX_ADMIN_SERVER_NAME_VALUE")"
+  webui_primary="$(first_word "$NGINX_WEBUI_SERVER_NAMES_VALUE")"
 
   if needs_nginx_config; then
     if [[ "$NGINX_DEPLOY_MODE_VALUE" == "lan" ]]; then
       if [[ -n "$lan_ip" ]]; then
         newapi_url="http://${lan_ip}:${NGINX_LAN_API_PORT_VALUE}"
         cliproxy_url="http://${lan_ip}:${NGINX_LAN_ADMIN_PORT_VALUE}"
+        webui_url="http://${lan_ip}:${NGINX_LAN_WEBUI_PORT_VALUE}"
       else
         newapi_url="http://服务器IP:${NGINX_LAN_API_PORT_VALUE}"
         cliproxy_url="http://服务器IP:${NGINX_LAN_ADMIN_PORT_VALUE}"
+        webui_url="http://服务器IP:${NGINX_LAN_WEBUI_PORT_VALUE}"
       fi
     elif [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
       newapi_url="$(url_with_port https "$api_primary" "$NGINX_HTTPS_PORT_VALUE")"
       cliproxy_url="$(url_with_port https "$admin_primary" "$NGINX_HTTPS_PORT_VALUE")"
+      webui_url="$(url_with_port https "$webui_primary" "$NGINX_HTTPS_PORT_VALUE")"
     else
       newapi_url="$(url_with_port http "$api_primary" "$NGINX_HTTP_PORT_VALUE")"
       cliproxy_url="$(url_with_port http "$admin_primary" "$NGINX_HTTP_PORT_VALUE")"
+      webui_url="$(url_with_port http "$webui_primary" "$NGINX_HTTP_PORT_VALUE")"
     fi
   else
     newapi_url="http://服务器IP:${NEWAPI_HOST_PORT_VALUE}"
     cliproxy_url="http://服务器IP:${CLIPROXY_PORT_8317_VALUE}"
+    webui_url="http://服务器IP:${GPT_IMAGE_WEBUI_HOST_PORT_VALUE}"
   fi
 
   section_title "部署完成"
-  field_line "生成目录：" "$STACK_DIR"
+  field_line "安装目录：" "$STACK_DIR"
   field_line "Compose 文件：" "$STACK_DIR/docker-compose.yml"
   field_line "环境文件：" "$STACK_DIR/.env"
 
@@ -2133,10 +2566,12 @@ print_summary() {
       field_line "Nginx 模式：" "局域网，不需要域名。"
       field_line "New API 入口端口：" "$NGINX_LAN_API_PORT_VALUE"
       field_line "CPA 入口端口：" "$NGINX_LAN_ADMIN_PORT_VALUE"
+      field_line "GPT Image WebUI 入口端口：" "$NGINX_LAN_WEBUI_PORT_VALUE"
     else
       field_line "Nginx 模式：" "公网，按域名转发。"
       field_line "New API 绑定域名：" "$NGINX_API_SERVER_NAMES_VALUE"
       field_line "CPA 绑定域名：" "$NGINX_ADMIN_SERVER_NAME_VALUE"
+      field_line "GPT Image WebUI 绑定域名：" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
       field_line "公网 HTTP 端口：" "$NGINX_HTTP_PORT_VALUE"
       if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
         field_line "公网 HTTPS 端口：" "$NGINX_HTTPS_PORT_VALUE"
@@ -2187,6 +2622,29 @@ print_summary() {
     fi
   fi
 
+  if needs_gpt_image_webui_config; then
+    section_title "GPT Image WebUI 信息"
+    field_line "访问地址：" "$webui_url"
+    field_line "图片目录：" "$STACK_DIR/gpt-image-2-webui/generated-images"
+    field_line "日志目录：" "$STACK_DIR/gpt-image-2-webui/logs"
+    if needs_nginx_config && [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" && "$NGINX_WEBUI_SERVER_NAMES_VALUE" != "" ]]; then
+      field_line "绑定域名：" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
+    fi
+    if [[ -n "$GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL_VALUE" ]]; then
+      field_line "默认 Base URL：" "$GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL_VALUE"
+    else
+      subtle_note "默认 Base URL 为空，用户可在 WebUI 页面填写。"
+    fi
+    if [[ -n "$GPT_IMAGE_WEBUI_APP_PASSWORD_VALUE" ]]; then
+      field_line "访问密码：" "$GPT_IMAGE_WEBUI_APP_PASSWORD_VALUE"
+    fi
+    if [[ "$GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE" != "true" ]]; then
+      subtle_note "GPT Image WebUI 未映射宿主机端口，只通过 Nginx / Docker 网络访问。"
+    else
+      field_line "直连端口：" "$GPT_IMAGE_WEBUI_HOST_PORT_VALUE"
+    fi
+  fi
+
   if needs_postgres_config; then
     section_title "PostgreSQL / Redis 信息"
     field_line "PostgreSQL 用户名：" "$POSTGRES_USER_VALUE"
@@ -2208,6 +2666,8 @@ print_summary() {
       field_line "New API 私钥：" "$NGINX_API_KEY_VALUE"
       field_line "CPA 证书：" "$NGINX_ADMIN_CERT_VALUE"
       field_line "CPA 私钥：" "$NGINX_ADMIN_KEY_VALUE"
+      field_line "GPT Image WebUI 证书：" "$NGINX_WEBUI_CERT_VALUE"
+      field_line "GPT Image WebUI 私钥：" "$NGINX_WEBUI_KEY_VALUE"
     fi
   fi
 }
@@ -2412,8 +2872,9 @@ SH
 }
 
 prepare_certificate_directory() {
-  read_line STACK_DIR "证书安装对应部署目录" "$DEFAULT_STACK_DIR"
-  STACK_DIR="$(expand_path "$STACK_DIR")"
+  use_fixed_stack_dir
+  show_stack_dir_notice
+  ensure_stack_dir_writable
   mkdir -p "$STACK_DIR/nginx/certs"
 }
 
@@ -2482,10 +2943,13 @@ issue_aliyun_certificate() {
     --fullchain-file "$cert_path" \
     --reloadcmd "$reload_cmd"
 
+  write_last_certificate_metadata "$base_domain" "$cert_file" "$key_file" "$include_wildcard"
+
   section_title "证书完成"
   field_line "证书目录：" "$STACK_DIR/nginx/certs"
   field_line "fullchain：" "$cert_file"
   field_line "私钥：" "$key_file"
+  field_line "证书记忆：" "$(last_certificate_metadata_file)"
   field_line "Nginx 重载脚本：" "$reload_script"
   subtle_note "部署公网 HTTPS 时选择共用证书，并填写上面的 fullchain 和私钥文件名即可。"
 }
@@ -2538,8 +3002,8 @@ manage_certificates() {
 
 uninstall_stack() {
   section_title "卸载部署"
-  read_line STACK_DIR "要卸载的目录" "$DEFAULT_STACK_DIR"
-  STACK_DIR="$(expand_path "$STACK_DIR")"
+  use_fixed_stack_dir
+  show_stack_dir_notice
 
   if [[ -f "$STACK_DIR/docker-compose.yml" ]]; then
     if try_detect_compose && docker info >/dev/null 2>&1; then
@@ -2562,7 +3026,7 @@ uninstall_stack() {
 
   if [[ -d "$STACK_DIR" ]]; then
     local remove_dir="true"
-    read_yes_no remove_dir "是否删除生成目录和配置文件" "$remove_dir"
+    read_yes_no remove_dir "是否删除安装目录和配置文件" "$remove_dir"
     if [[ "$remove_dir" == "true" ]]; then
       safe_remove_dir "$STACK_DIR"
       printf '%s\n' "$(color_text "$COLOR_GREEN" "已删除目录：$STACK_DIR")"
