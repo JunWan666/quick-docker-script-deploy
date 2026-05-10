@@ -26,7 +26,7 @@ APP_NET_NAME_VALUE="app-net"
 ADVANCED_CONFIG_VALUE=false
 
 NEWAPI_IMAGE_VALUE="calciumion/new-api:latest"
-NEWAPI_PUBLISH_HOST_PORT_VALUE=true
+NEWAPI_PUBLISH_HOST_PORT_VALUE=false
 NEWAPI_HOST_PORT_VALUE="3000"
 NEWAPI_SESSION_SECRET_VALUE=""
 NEWAPI_CRYPTO_SECRET_VALUE=""
@@ -44,7 +44,7 @@ REDIS_IMAGE_VALUE="redis:7-alpine"
 
 CLIPROXY_IMAGE_VALUE="eceasy/cli-proxy-api:latest"
 CLIPROXY_DEPLOY_VALUE=""
-CLIPROXY_PUBLISH_HOST_PORTS_VALUE=true
+CLIPROXY_PUBLISH_HOST_PORTS_VALUE=false
 CLIPROXY_PORT_8317_VALUE="8317"
 CLIPROXY_PORT_8085_VALUE="8085"
 CLIPROXY_PORT_1455_VALUE="1455"
@@ -57,7 +57,7 @@ CLIPROXY_API_KEY_VALUE=""
 SUB2API_IMAGE_VALUE="weishaw/sub2api:latest"
 SUB2API_POSTGRES_IMAGE_VALUE="postgres:18-alpine"
 SUB2API_REDIS_IMAGE_VALUE="redis:8-alpine"
-SUB2API_PUBLISH_HOST_PORT_VALUE=true
+SUB2API_PUBLISH_HOST_PORT_VALUE=false
 SUB2API_HOST_PORT_VALUE="8081"
 SUB2API_SERVER_MODE_VALUE="release"
 SUB2API_RUN_MODE_VALUE="standard"
@@ -72,7 +72,7 @@ SUB2API_TOTP_ENCRYPTION_KEY_VALUE=""
 SUB2API_UPDATE_PROXY_URL_VALUE=""
 
 GPT_IMAGE_WEBUI_IMAGE_VALUE="tannic666/gpt-image-2-webui:latest"
-GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE=true
+GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE=false
 GPT_IMAGE_WEBUI_HOST_PORT_VALUE="3001"
 GPT_IMAGE_WEBUI_OPENAI_API_KEY_VALUE=""
 GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL_VALUE=""
@@ -406,11 +406,11 @@ ensure_available_port() {
 }
 
 resolve_publish_ports() {
-  if [[ "$NEWAPI_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+  if needs_newapi_config && [[ "$NEWAPI_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
     ensure_available_port NEWAPI_HOST_PORT_VALUE "New API 直连" 3000
   fi
 
-  if [[ "$CLIPROXY_PUBLISH_HOST_PORTS_VALUE" == "true" ]]; then
+  if needs_cliproxy_config && [[ "$CLIPROXY_PUBLISH_HOST_PORTS_VALUE" == "true" ]]; then
     ensure_available_port CLIPROXY_PORT_8317_VALUE "CLIProxyAPI 8317 直连" 8317
     ensure_available_port CLIPROXY_PORT_8085_VALUE "CLIProxyAPI 8085 直连" 8085 "$CLIPROXY_PORT_8317_VALUE"
     ensure_available_port CLIPROXY_PORT_1455_VALUE "CLIProxyAPI 1455 直连" 1455
@@ -419,11 +419,11 @@ resolve_publish_ports() {
     ensure_available_port CLIPROXY_PORT_11451_VALUE "CLIProxyAPI 11451 直连" 11451
   fi
 
-  if [[ "$SUB2API_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+  if needs_sub2api_config && [[ "$SUB2API_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
     ensure_available_port SUB2API_HOST_PORT_VALUE "Sub2API 直连" 8081 "$NEWAPI_HOST_PORT_VALUE"
   fi
 
-  if [[ "$GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+  if needs_gpt_image_webui_config && [[ "$GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
     ensure_available_port GPT_IMAGE_WEBUI_HOST_PORT_VALUE "GPT Image WebUI 直连" 3001 "$SUB2API_HOST_PORT_VALUE"
   fi
 
@@ -432,10 +432,18 @@ resolve_publish_ports() {
   fi
 
   if [[ "$NGINX_DEPLOY_MODE_VALUE" == "lan" ]]; then
-    ensure_available_port NGINX_LAN_API_PORT_VALUE "Nginx 局域网 API 入口" 18080
-    ensure_available_port NGINX_LAN_ADMIN_PORT_VALUE "Nginx 局域网管理端入口" 18081 "$NGINX_LAN_API_PORT_VALUE"
-    ensure_available_port NGINX_LAN_SUB2API_PORT_VALUE "Nginx 局域网 Sub2API 入口" 18082 "$NGINX_LAN_ADMIN_PORT_VALUE"
-    ensure_available_port NGINX_LAN_WEBUI_PORT_VALUE "Nginx 局域网 GPT Image WebUI 入口" 18083 "$NGINX_LAN_SUB2API_PORT_VALUE"
+    if needs_newapi_config; then
+      ensure_available_port NGINX_LAN_API_PORT_VALUE "Nginx 局域网 API 入口" 18080
+    fi
+    if needs_cliproxy_config; then
+      ensure_available_port NGINX_LAN_ADMIN_PORT_VALUE "Nginx 局域网管理端入口" 18081 "$NGINX_LAN_API_PORT_VALUE"
+    fi
+    if needs_sub2api_config; then
+      ensure_available_port NGINX_LAN_SUB2API_PORT_VALUE "Nginx 局域网 Sub2API 入口" 18082 "$NGINX_LAN_ADMIN_PORT_VALUE"
+    fi
+    if needs_gpt_image_webui_config; then
+      ensure_available_port NGINX_LAN_WEBUI_PORT_VALUE "Nginx 局域网 GPT Image WebUI 入口" 18083 "$NGINX_LAN_SUB2API_PORT_VALUE"
+    fi
   else
     ensure_available_port NGINX_HTTP_PORT_VALUE "Nginx 公网 HTTP 入口" 18080
     if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
@@ -732,22 +740,22 @@ service_from_token() {
   token="$(lower "$1")"
 
   case "$token" in
-    1|nginx|proxy|gateway)
+    nginx|proxy|gateway)
       printf 'nginx'
       ;;
-    2|newapi|new-api|api)
+    1|newapi|new-api|api)
       printf 'new-api'
       ;;
     postgres|postgresql|pg|db|redis|cache)
       printf 'new-api'
       ;;
-    3|cliproxy|cliproxyapi|cli-proxy-api|cli|cpa)
+    2|cliproxy|cliproxyapi|cli-proxy-api|cli|cpa)
       printf 'cli-proxy-api'
       ;;
-    4|sub2api|sub-api|subapi|sub|subscription)
+    3|sub2api|sub-api|subapi|sub|subscription)
       printf 'sub2api'
       ;;
-    5|gpt-image-2-webui|gpt-image-webui|gptimage|gpt-image|image-webui|webui|image|image2)
+    4|gpt-image-2-webui|gpt-image-webui|gptimage|gpt-image|image-webui|webui|image|image2)
       printf 'gpt-image-2-webui'
       ;;
     *)
@@ -768,15 +776,16 @@ select_services() {
   local raw=""
   local token=""
   local service=""
+  local saw_nginx_default="false"
 
   section_title "服务选择"
-  menu_option "$COLOR_GREEN" " 1)" "nginx"
-  menu_option "$COLOR_GREEN" " 2)" "new-api"
-  menu_option "$COLOR_GREEN" " 3)" "cli-proxy-api"
-  menu_option "$COLOR_GREEN" " 4)" "sub2api"
-  menu_option "$COLOR_GREEN" " 5)" "gpt-image-2-webui"
+  menu_option "$COLOR_GREEN" " 1)" "new-api"
+  menu_option "$COLOR_GREEN" " 2)" "cli-proxy-api"
+  menu_option "$COLOR_GREEN" " 3)" "sub2api"
+  menu_option "$COLOR_GREEN" " 4)" "gpt-image-2-webui"
+  subtle_note "Nginx 默认作为统一网关必装，会按所选应用自动生成入口。"
   subtle_note "new-api 和 sub2api 的 PostgreSQL / Redis 依赖会自动处理，不单独选择。"
-  subtle_note "输入 all、12345、1 2、1,2 或服务名都可以；选 1 会启用 Nginx。"
+  subtle_note "输入 all、1234、1 2、1,2 或服务名都可以。"
 
   while true; do
     read_line raw "要部署的服务" "all"
@@ -793,25 +802,41 @@ select_services() {
 
     DEPLOY_ALL=false
     SELECTED_SERVICES=()
+    saw_nginx_default="false"
 
     for token in $raw; do
-      if [[ "$token" =~ ^[12345]+$ && "${#token}" -gt 1 ]]; then
+      if [[ "$token" =~ ^[1234]+$ && "${#token}" -gt 1 ]]; then
         local index=0
         local char=""
         for ((index = 0; index < ${#token}; index++)); do
           char="${token:index:1}"
           if service="$(service_from_token "$char")"; then
-            append_selected_service "$service"
+            if [[ "$service" == "nginx" ]]; then
+              saw_nginx_default="true"
+            else
+              append_selected_service "$service"
+            fi
           fi
         done
       elif service="$(service_from_token "$token")"; then
-        append_selected_service "$service"
+        if [[ "$service" == "nginx" ]]; then
+          saw_nginx_default="true"
+        else
+          append_selected_service "$service"
+        fi
       else
         printf '无法识别的服务：%s\n' "$token"
       fi
     done
 
+    if [[ "${#SELECTED_SERVICES[@]}" -eq 0 && "$saw_nginx_default" == "true" ]]; then
+      subtle_note "Nginx 默认必装，不需要选择；请至少选择一个应用，或输入 all。"
+    fi
+
     if [[ "${#SELECTED_SERVICES[@]}" -gt 0 ]]; then
+      if [[ "$saw_nginx_default" == "true" ]]; then
+        subtle_note "Nginx 默认必装，已忽略输入里的 nginx。"
+      fi
       printf '已选择：%s\n' "$(join_list "${SELECTED_SERVICES[@]}")"
       return
     fi
@@ -822,7 +847,6 @@ select_services() {
 
 needs_newapi_config() {
   selected_or_all "new-api" && return 0
-  selected_or_all "nginx" && return 0
   return 1
 }
 
@@ -833,28 +857,47 @@ needs_postgres_config() {
 
 needs_cliproxy_config() {
   selected_or_all "cli-proxy-api" && return 0
-  selected_or_all "nginx" && return 0
   return 1
 }
 
 needs_sub2api_config() {
   selected_or_all "sub2api" && return 0
-  selected_or_all "nginx" && return 0
   return 1
 }
 
 needs_gpt_image_webui_config() {
   selected_or_all "gpt-image-2-webui" && return 0
-  selected_or_all "nginx" && return 0
   return 1
 }
 
 needs_nginx_config() {
-  selected_or_all "nginx"
+  return 0
 }
 
 last_certificate_metadata_file() {
   printf '%s' "$STACK_DIR/nginx/certs/.last-cert.env"
+}
+
+nginx_selected_service_names() {
+  local names=()
+
+  needs_newapi_config && names+=("New API")
+  needs_cliproxy_config && names+=("CPA")
+  needs_sub2api_config && names+=("Sub2API")
+  needs_gpt_image_webui_config && names+=("GPT Image WebUI")
+
+  join_list "${names[@]}"
+}
+
+build_nginx_http_server_names() {
+  local names=()
+
+  needs_newapi_config && names+=("$NGINX_API_SERVER_NAMES_VALUE")
+  needs_cliproxy_config && names+=("$NGINX_ADMIN_SERVER_NAME_VALUE")
+  needs_sub2api_config && names+=("$NGINX_SUB2API_SERVER_NAMES_VALUE")
+  needs_gpt_image_webui_config && names+=("$NGINX_WEBUI_SERVER_NAMES_VALUE")
+
+  printf '%s' "${names[*]}"
 }
 
 write_last_certificate_metadata() {
@@ -932,7 +975,7 @@ read_nginx_certificate_files() {
     fi
   fi
 
-  read_yes_no share_cert "New API、CPA、Sub2API 和 GPT Image WebUI 是否共用同一个证书" "$NGINX_SHARE_CERT_VALUE"
+  read_yes_no share_cert "$(nginx_selected_service_names) 是否共用同一个证书" "$NGINX_SHARE_CERT_VALUE"
   NGINX_SHARE_CERT_VALUE="$share_cert"
 
   if [[ "$NGINX_SHARE_CERT_VALUE" == "true" ]]; then
@@ -944,18 +987,26 @@ read_nginx_certificate_files() {
     NGINX_SUB2API_KEY_VALUE="$NGINX_API_KEY_VALUE"
     NGINX_WEBUI_CERT_VALUE="$NGINX_API_CERT_VALUE"
     NGINX_WEBUI_KEY_VALUE="$NGINX_API_KEY_VALUE"
-    printf '已设置：New API、CPA、Sub2API 和 GPT Image WebUI 共用证书 %s / %s。\n' "$NGINX_API_CERT_VALUE" "$NGINX_API_KEY_VALUE"
+    printf '已设置：%s 共用证书 %s / %s。\n' "$(nginx_selected_service_names)" "$NGINX_API_CERT_VALUE" "$NGINX_API_KEY_VALUE"
     return
   fi
 
-  read_line NGINX_API_CERT_VALUE "nginx/certs 里的 New API 证书文件名" "$NGINX_API_CERT_VALUE"
-  read_line NGINX_API_KEY_VALUE "nginx/certs 里的 New API 私钥文件名" "$NGINX_API_KEY_VALUE"
-  read_line NGINX_ADMIN_CERT_VALUE "nginx/certs 里的 CPA 证书文件名" "$NGINX_ADMIN_CERT_VALUE"
-  read_line NGINX_ADMIN_KEY_VALUE "nginx/certs 里的 CPA 私钥文件名" "$NGINX_ADMIN_KEY_VALUE"
-  read_line NGINX_SUB2API_CERT_VALUE "nginx/certs 里的 Sub2API 证书文件名" "$NGINX_SUB2API_CERT_VALUE"
-  read_line NGINX_SUB2API_KEY_VALUE "nginx/certs 里的 Sub2API 私钥文件名" "$NGINX_SUB2API_KEY_VALUE"
-  read_line NGINX_WEBUI_CERT_VALUE "nginx/certs 里的 GPT Image WebUI 证书文件名" "$NGINX_WEBUI_CERT_VALUE"
-  read_line NGINX_WEBUI_KEY_VALUE "nginx/certs 里的 GPT Image WebUI 私钥文件名" "$NGINX_WEBUI_KEY_VALUE"
+  if needs_newapi_config; then
+    read_line NGINX_API_CERT_VALUE "nginx/certs 里的 New API 证书文件名" "$NGINX_API_CERT_VALUE"
+    read_line NGINX_API_KEY_VALUE "nginx/certs 里的 New API 私钥文件名" "$NGINX_API_KEY_VALUE"
+  fi
+  if needs_cliproxy_config; then
+    read_line NGINX_ADMIN_CERT_VALUE "nginx/certs 里的 CPA 证书文件名" "$NGINX_ADMIN_CERT_VALUE"
+    read_line NGINX_ADMIN_KEY_VALUE "nginx/certs 里的 CPA 私钥文件名" "$NGINX_ADMIN_KEY_VALUE"
+  fi
+  if needs_sub2api_config; then
+    read_line NGINX_SUB2API_CERT_VALUE "nginx/certs 里的 Sub2API 证书文件名" "$NGINX_SUB2API_CERT_VALUE"
+    read_line NGINX_SUB2API_KEY_VALUE "nginx/certs 里的 Sub2API 私钥文件名" "$NGINX_SUB2API_KEY_VALUE"
+  fi
+  if needs_gpt_image_webui_config; then
+    read_line NGINX_WEBUI_CERT_VALUE "nginx/certs 里的 GPT Image WebUI 证书文件名" "$NGINX_WEBUI_CERT_VALUE"
+    read_line NGINX_WEBUI_KEY_VALUE "nginx/certs 里的 GPT Image WebUI 私钥文件名" "$NGINX_WEBUI_KEY_VALUE"
+  fi
 }
 
 uses_nginx_frontend() {
@@ -1280,19 +1331,19 @@ service_from_compose_token() {
   local token="$(lower "$1")"
 
   case "$token" in
-    1|nginx|proxy|gateway)
+    nginx|proxy|gateway)
       printf 'nginx'
       ;;
-    2|new-api|newapi|api)
+    1|new-api|newapi|api)
       printf 'new-api'
       ;;
-    3|cli-proxy-api|cliproxy-api|cliproxy|cpa|admin)
+    2|cli-proxy-api|cliproxy-api|cliproxy|cpa|admin)
       printf 'cli-proxy-api'
       ;;
-    4|sub2api|sub-api|subapi|sub|subscription)
+    3|sub2api|sub-api|subapi|sub|subscription)
       printf 'sub2api'
       ;;
-    5|gpt-image-2-webui|gpt-image-webui|gptimage|gpt-image|image-webui|webui|image|image2)
+    4|gpt-image-2-webui|gpt-image-webui|gptimage|gpt-image|image-webui|webui|image|image2)
       printf 'gpt-image-2-webui'
       ;;
     sub2api-postgres|sub2api-pg|sub2api-db)
@@ -1327,7 +1378,7 @@ select_compose_targets() {
   local service=""
 
   COMPOSE_TARGETS=()
-  subtle_note "输入 all 表示全部；也可以输入 12345、1 2、1,2、nginx、sub2api、webui、postgres、redis。"
+  subtle_note "输入 all 表示全部；也可以输入 1234、1 2、1,2、nginx、sub2api、webui、postgres、redis。"
 
   while true; do
     read_line raw "请选择要操作的服务" "all"
@@ -1343,7 +1394,7 @@ select_compose_targets() {
 
     COMPOSE_TARGETS=()
     for token in $raw; do
-      if [[ "$token" =~ ^[12345]+$ && "${#token}" -gt 1 ]]; then
+      if [[ "$token" =~ ^[1234]+$ && "${#token}" -gt 1 ]]; then
         local index=0
         local char=""
         for ((index = 0; index < ${#token}; index++)); do
@@ -1406,7 +1457,7 @@ collect_answers() {
       read_line NEWAPI_IMAGE_VALUE "New API 镜像" "$NEWAPI_IMAGE_VALUE"
       if uses_nginx_frontend; then
         NEWAPI_PUBLISH_HOST_PORT_VALUE=false
-        printf '已选择 Nginx，New API 默认不映射宿主机端口，只允许 Nginx 通过 Docker 网络访问。\n'
+        printf '默认启用 Nginx，New API 默认不映射宿主机端口，只允许 Nginx 通过 Docker 网络访问。\n'
       else
         read_yes_no NEWAPI_PUBLISH_HOST_PORT_VALUE "是否开放 New API 直连端口" "$NEWAPI_PUBLISH_HOST_PORT_VALUE"
       fi
@@ -1427,7 +1478,7 @@ collect_answers() {
       NEWAPI_MAX_FILE_DOWNLOAD_MB_VALUE="10240"
       if uses_nginx_frontend; then
         NEWAPI_PUBLISH_HOST_PORT_VALUE=false
-        printf '已选择 Nginx，New API 默认只通过 Docker 网络访问。\n'
+        printf '默认启用 Nginx，New API 默认只通过 Docker 网络访问。\n'
       else
         NEWAPI_PUBLISH_HOST_PORT_VALUE=true
       fi
@@ -1466,7 +1517,7 @@ collect_answers() {
       read_line CLIPROXY_API_KEY_VALUE "CLIProxyAPI api-key（明文）" "$CLIPROXY_API_KEY_VALUE"
       if uses_nginx_frontend; then
         CLIPROXY_PUBLISH_HOST_PORTS_VALUE=false
-        printf '已选择 Nginx，CLIProxyAPI 默认不映射宿主机端口，只通过 Nginx 代理 8317 服务。\n'
+        printf '默认启用 Nginx，CLIProxyAPI 默认不映射宿主机端口，只通过 Nginx 代理 8317 服务。\n'
       else
         read_yes_no CLIPROXY_PUBLISH_HOST_PORTS_VALUE "是否开放 CLIProxyAPI 直连端口" "$CLIPROXY_PUBLISH_HOST_PORTS_VALUE"
       fi
@@ -1483,7 +1534,7 @@ collect_answers() {
       CLIPROXY_DEPLOY_VALUE=""
       if uses_nginx_frontend; then
         CLIPROXY_PUBLISH_HOST_PORTS_VALUE=false
-        printf '已选择 Nginx，CLIProxyAPI 默认只通过 Nginx 代理访问。\n'
+        printf '默认启用 Nginx，CLIProxyAPI 默认只通过 Nginx 代理访问。\n'
       else
         CLIPROXY_PUBLISH_HOST_PORTS_VALUE=true
       fi
@@ -1515,7 +1566,7 @@ collect_answers() {
       read_line SUB2API_UPDATE_PROXY_URL_VALUE "Sub2API 更新代理 URL（可留空）" "$SUB2API_UPDATE_PROXY_URL_VALUE"
       if uses_nginx_frontend; then
         SUB2API_PUBLISH_HOST_PORT_VALUE=false
-        printf '已选择 Nginx，Sub2API 默认不映射宿主机端口，只通过 Nginx 访问。\n'
+        printf '默认启用 Nginx，Sub2API 默认不映射宿主机端口，只通过 Nginx 访问。\n'
       else
         read_yes_no SUB2API_PUBLISH_HOST_PORT_VALUE "是否开放 Sub2API 直连端口" "$SUB2API_PUBLISH_HOST_PORT_VALUE"
       fi
@@ -1532,7 +1583,7 @@ collect_answers() {
       SUB2API_POSTGRES_DB_VALUE="sub2api"
       if uses_nginx_frontend; then
         SUB2API_PUBLISH_HOST_PORT_VALUE=false
-        printf '已选择 Nginx，Sub2API 默认只通过 Nginx 访问。\n'
+        printf '默认启用 Nginx，Sub2API 默认只通过 Nginx 访问。\n'
       else
         SUB2API_PUBLISH_HOST_PORT_VALUE=true
       fi
@@ -1566,7 +1617,7 @@ collect_answers() {
       fi
       if uses_nginx_frontend; then
         GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE=false
-        printf '已选择 Nginx，GPT Image WebUI 默认不映射宿主机端口，只通过 Nginx 访问。\n'
+        printf '默认启用 Nginx，GPT Image WebUI 默认不映射宿主机端口，只通过 Nginx 访问。\n'
       else
         read_yes_no GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE "是否开放 GPT Image WebUI 直连端口" "$GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE"
       fi
@@ -1585,7 +1636,7 @@ collect_answers() {
       GPT_IMAGE_WEBUI_CLEANUP_LOG_FILE_VALUE="/app/logs/cleanup-generated-images.log"
       if uses_nginx_frontend; then
         GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE=false
-        printf '已选择 Nginx，GPT Image WebUI 默认只通过 Nginx 访问。\n'
+        printf '默认启用 Nginx，GPT Image WebUI 默认只通过 Nginx 访问。\n'
       else
         GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE=true
       fi
@@ -1600,28 +1651,18 @@ collect_answers() {
       if [[ "$NGINX_DEPLOY_MODE_VALUE" == "lan" ]]; then
         NGINX_ENABLE_HTTPS=false
         NGINX_HTTP_TO_HTTPS_REDIRECT_VALUE=true
-        read_line NGINX_LAN_API_PORT_VALUE "局域网 API 入口主机端口" "$NGINX_LAN_API_PORT_VALUE"
-        while true; do
+        if needs_newapi_config; then
+          read_line NGINX_LAN_API_PORT_VALUE "局域网 API 入口主机端口" "$NGINX_LAN_API_PORT_VALUE"
+        fi
+        if needs_cliproxy_config; then
           read_line NGINX_LAN_ADMIN_PORT_VALUE "局域网管理端入口主机端口" "$NGINX_LAN_ADMIN_PORT_VALUE"
-          if [[ "$NGINX_LAN_ADMIN_PORT_VALUE" != "$NGINX_LAN_API_PORT_VALUE" ]]; then
-            break
-          fi
-          printf 'API 入口端口和管理端端口不能相同，请重新输入。\n'
-        done
-        while true; do
+        fi
+        if needs_sub2api_config; then
           read_line NGINX_LAN_SUB2API_PORT_VALUE "局域网 Sub2API 入口主机端口" "$NGINX_LAN_SUB2API_PORT_VALUE"
-          if [[ "$NGINX_LAN_SUB2API_PORT_VALUE" != "$NGINX_LAN_API_PORT_VALUE" && "$NGINX_LAN_SUB2API_PORT_VALUE" != "$NGINX_LAN_ADMIN_PORT_VALUE" ]]; then
-            break
-          fi
-          printf 'Sub2API 入口端口不能和 API / 管理端端口相同，请重新输入。\n'
-        done
-        while true; do
+        fi
+        if needs_gpt_image_webui_config; then
           read_line NGINX_LAN_WEBUI_PORT_VALUE "局域网 GPT Image WebUI 入口主机端口" "$NGINX_LAN_WEBUI_PORT_VALUE"
-          if [[ "$NGINX_LAN_WEBUI_PORT_VALUE" != "$NGINX_LAN_API_PORT_VALUE" && "$NGINX_LAN_WEBUI_PORT_VALUE" != "$NGINX_LAN_ADMIN_PORT_VALUE" && "$NGINX_LAN_WEBUI_PORT_VALUE" != "$NGINX_LAN_SUB2API_PORT_VALUE" ]]; then
-            break
-          fi
-          printf 'WebUI 入口端口不能和 API / 管理端 / Sub2API 端口相同，请重新输入。\n'
-        done
+        fi
       else
         read_yes_no https_enabled "是否启用 Nginx HTTPS 配置" "$NGINX_ENABLE_HTTPS"
         NGINX_ENABLE_HTTPS="$https_enabled"
@@ -1634,19 +1675,19 @@ collect_answers() {
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           read_line NGINX_HTTPS_PORT_VALUE "Nginx HTTPS 主机端口" "$NGINX_HTTPS_PORT_VALUE"
         fi
-        read_line NGINX_API_SERVER_NAMES_VALUE "New API 绑定域名（多个空格分隔）" "$NGINX_API_SERVER_NAMES_VALUE"
-        read_line NGINX_ADMIN_SERVER_NAME_VALUE "CLIProxyAPI 绑定域名（多个空格分隔）" "$NGINX_ADMIN_SERVER_NAME_VALUE"
-        read_line NGINX_SUB2API_SERVER_NAMES_VALUE "Sub2API 绑定域名（多个空格分隔）" "$NGINX_SUB2API_SERVER_NAMES_VALUE"
-        read_line NGINX_WEBUI_SERVER_NAMES_VALUE "GPT Image WebUI 绑定域名（多个空格分隔）" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
-        NGINX_HTTP_SERVER_NAMES_VALUE="${NGINX_API_SERVER_NAMES_VALUE} ${NGINX_ADMIN_SERVER_NAME_VALUE} ${NGINX_SUB2API_SERVER_NAMES_VALUE} ${NGINX_WEBUI_SERVER_NAMES_VALUE}"
+        needs_newapi_config && read_line NGINX_API_SERVER_NAMES_VALUE "New API 绑定域名（多个空格分隔）" "$NGINX_API_SERVER_NAMES_VALUE"
+        needs_cliproxy_config && read_line NGINX_ADMIN_SERVER_NAME_VALUE "CLIProxyAPI 绑定域名（多个空格分隔）" "$NGINX_ADMIN_SERVER_NAME_VALUE"
+        needs_sub2api_config && read_line NGINX_SUB2API_SERVER_NAMES_VALUE "Sub2API 绑定域名（多个空格分隔）" "$NGINX_SUB2API_SERVER_NAMES_VALUE"
+        needs_gpt_image_webui_config && read_line NGINX_WEBUI_SERVER_NAMES_VALUE "GPT Image WebUI 绑定域名（多个空格分隔）" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
+        NGINX_HTTP_SERVER_NAMES_VALUE="$(build_nginx_http_server_names)"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           read_nginx_certificate_files
         fi
-        read_line NGINX_NEWAPI_UPSTREAM_VALUE "New API 上游地址" "$NGINX_NEWAPI_UPSTREAM_VALUE"
-        read_line NGINX_CLIPROXY_UPSTREAM_VALUE "CLIProxyAPI 上游地址" "$NGINX_CLIPROXY_UPSTREAM_VALUE"
-        read_line NGINX_SUB2API_UPSTREAM_VALUE "Sub2API 上游地址" "$NGINX_SUB2API_UPSTREAM_VALUE"
-        read_line NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE "GPT Image WebUI 上游地址" "$NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE"
-        printf '已绑定：New API -> %s；CLIProxyAPI -> %s；Sub2API -> %s；GPT Image WebUI -> %s。\n' "$NGINX_API_SERVER_NAMES_VALUE" "$NGINX_ADMIN_SERVER_NAME_VALUE" "$NGINX_SUB2API_SERVER_NAMES_VALUE" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
+        needs_newapi_config && read_line NGINX_NEWAPI_UPSTREAM_VALUE "New API 上游地址" "$NGINX_NEWAPI_UPSTREAM_VALUE"
+        needs_cliproxy_config && read_line NGINX_CLIPROXY_UPSTREAM_VALUE "CLIProxyAPI 上游地址" "$NGINX_CLIPROXY_UPSTREAM_VALUE"
+        needs_sub2api_config && read_line NGINX_SUB2API_UPSTREAM_VALUE "Sub2API 上游地址" "$NGINX_SUB2API_UPSTREAM_VALUE"
+        needs_gpt_image_webui_config && read_line NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE "GPT Image WebUI 上游地址" "$NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE"
+        printf '已绑定所选 Nginx 站点：%s。\n' "$(nginx_selected_service_names)"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           if [[ "$NGINX_HTTP_TO_HTTPS_REDIRECT_VALUE" == "true" ]]; then
             printf 'HTTP 80 会 301 跳转到 HTTPS 端口 %s。\n' "$NGINX_HTTPS_PORT_VALUE"
@@ -1671,11 +1712,11 @@ collect_answers() {
         fi
       fi
       if [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" ]]; then
-        read_line NGINX_API_SERVER_NAMES_VALUE "New API 绑定域名（多个空格分隔）" "$NGINX_API_SERVER_NAMES_VALUE"
-        read_line NGINX_ADMIN_SERVER_NAME_VALUE "CLIProxyAPI 绑定域名（多个空格分隔）" "$NGINX_ADMIN_SERVER_NAME_VALUE"
-        read_line NGINX_SUB2API_SERVER_NAMES_VALUE "Sub2API 绑定域名（多个空格分隔）" "$NGINX_SUB2API_SERVER_NAMES_VALUE"
-        read_line NGINX_WEBUI_SERVER_NAMES_VALUE "GPT Image WebUI 绑定域名（多个空格分隔）" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
-        NGINX_HTTP_SERVER_NAMES_VALUE="${NGINX_API_SERVER_NAMES_VALUE} ${NGINX_ADMIN_SERVER_NAME_VALUE} ${NGINX_SUB2API_SERVER_NAMES_VALUE} ${NGINX_WEBUI_SERVER_NAMES_VALUE}"
+        needs_newapi_config && read_line NGINX_API_SERVER_NAMES_VALUE "New API 绑定域名（多个空格分隔）" "$NGINX_API_SERVER_NAMES_VALUE"
+        needs_cliproxy_config && read_line NGINX_ADMIN_SERVER_NAME_VALUE "CLIProxyAPI 绑定域名（多个空格分隔）" "$NGINX_ADMIN_SERVER_NAME_VALUE"
+        needs_sub2api_config && read_line NGINX_SUB2API_SERVER_NAMES_VALUE "Sub2API 绑定域名（多个空格分隔）" "$NGINX_SUB2API_SERVER_NAMES_VALUE"
+        needs_gpt_image_webui_config && read_line NGINX_WEBUI_SERVER_NAMES_VALUE "GPT Image WebUI 绑定域名（多个空格分隔）" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
+        NGINX_HTTP_SERVER_NAMES_VALUE="$(build_nginx_http_server_names)"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           read_nginx_certificate_files
         fi
@@ -1685,7 +1726,7 @@ collect_answers() {
       NGINX_SUB2API_UPSTREAM_VALUE="sub2api:8080"
       NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE="gpt-image-2-webui:3000"
       if [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" ]]; then
-        printf '已绑定：New API -> %s；CLIProxyAPI -> %s；Sub2API -> %s；GPT Image WebUI -> %s。\n' "$NGINX_API_SERVER_NAMES_VALUE" "$NGINX_ADMIN_SERVER_NAME_VALUE" "$NGINX_SUB2API_SERVER_NAMES_VALUE" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
+        printf '已绑定所选 Nginx 站点：%s。\n' "$(nginx_selected_service_names)"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           if [[ "$NGINX_HTTP_TO_HTTPS_REDIRECT_VALUE" == "true" ]]; then
             printf 'HTTP 80 会 301 跳转到 HTTPS 端口 %s。\n' "$NGINX_HTTPS_PORT_VALUE"
@@ -1730,6 +1771,7 @@ prepare_directories() {
   mkdir -p "$STACK_DIR/gpt-image-2-webui/logs"
   mkdir -p "$STACK_DIR/nginx/conf.d"
   mkdir -p "$STACK_DIR/nginx/certs"
+  chmod -R a+rwX "$STACK_DIR/gpt-image-2-webui/generated-images" "$STACK_DIR/gpt-image-2-webui/logs" 2>/dev/null || true
 }
 
 write_env_file() {
@@ -1868,669 +1910,148 @@ nonstream-keepalive-interval: 0
 YAML
 }
 
-write_nginx_conf() {
-  local active_conf="$STACK_DIR/nginx/conf.d/default.conf"
+write_nginx_conf_header() {
+  local file="$1"
+  local title="$2"
 
-  if [[ "$NGINX_DEPLOY_MODE_VALUE" == "lan" ]]; then
-    cat > "$active_conf" <<NGINX
-# 局域网模式
+  cat > "$file" <<NGINX
+# ${title}
 map \$http_upgrade \$connection_upgrade {
     default upgrade;
     '' close;
 }
-
-# 1. New API
-server {
-    listen 80 default_server;
-    server_name _;
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_NEWAPI_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto http;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
-    }
-}
-
-# 2. CPA / CLIProxyAPI
-server {
-    listen 8080 default_server;
-    server_name _;
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_CLIPROXY_UPSTREAM_VALUE};
-        proxy_connect_timeout 600s;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto http;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-    }
-}
-
-# 3. Sub2API
-server {
-    listen 8081 default_server;
-    server_name _;
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_SUB2API_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto http;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-    }
-}
-
-# 4. GPT Image WebUI
-server {
-    listen 8082 default_server;
-    server_name _;
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto http;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-    }
-}
 NGINX
+}
+
+append_nginx_proxy_server() {
+  local file="$1"
+  local title="$2"
+  local listen_value="$3"
+  local server_names="$4"
+  local upstream="$5"
+  local forwarded_proto="$6"
+  local cert_file="${7:-}"
+  local key_file="${8:-}"
+  local read_timeout="${9:-600s}"
+  local connect_timeout="${10:-}"
+
+  {
+    printf '\n# %s\n' "$title"
+    printf 'server {\n'
+    printf '    listen %s;\n' "$listen_value"
+    printf '    server_name %s;\n\n' "$server_names"
+
+    if [[ -n "$cert_file" ]]; then
+      printf '    ssl_certificate      /etc/nginx/certs/%s;\n' "$cert_file"
+      printf '    ssl_certificate_key  /etc/nginx/certs/%s;\n\n' "$key_file"
+      printf '    ssl_protocols TLSv1.2 TLSv1.3;\n'
+      printf '    ssl_session_cache shared:SSL:10m;\n'
+      printf '    ssl_session_timeout 10m;\n\n'
+    fi
+
+    printf '    client_max_body_size 0;\n\n'
+    printf '    location / {\n'
+    printf '        proxy_pass http://%s;\n' "$upstream"
+    if [[ -n "$connect_timeout" ]]; then
+      printf '        proxy_connect_timeout %s;\n' "$connect_timeout"
+    fi
+    printf '        proxy_http_version 1.1;\n'
+    printf '        proxy_set_header Host $host;\n'
+    printf '        proxy_set_header X-Real-IP $remote_addr;\n'
+    printf '        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n'
+    printf '        proxy_set_header X-Forwarded-Proto %s;\n' "$forwarded_proto"
+    printf '        proxy_set_header Upgrade $http_upgrade;\n'
+    printf '        proxy_set_header Connection $connection_upgrade;\n'
+    printf '        proxy_read_timeout %s;\n' "$read_timeout"
+    printf '        proxy_send_timeout %s;\n' "$read_timeout"
+    printf '    }\n'
+    printf '}\n'
+  } >> "$file"
+}
+
+append_selected_nginx_servers() {
+  local file="$1"
+  local listen_value="$2"
+  local forwarded_proto="$3"
+  local ssl_enabled="$4"
+  local suffix="${5:-}"
+
+  if needs_newapi_config; then
+    if [[ "$ssl_enabled" == "true" ]]; then
+      append_nginx_proxy_server "$file" "1. API 服务 (New API)${suffix}" "$listen_value" "$NGINX_API_SERVER_NAMES_VALUE" "$NGINX_NEWAPI_UPSTREAM_VALUE" "$forwarded_proto" "$NGINX_API_CERT_VALUE" "$NGINX_API_KEY_VALUE" "300s"
+    else
+      append_nginx_proxy_server "$file" "1. API 服务 (New API)${suffix}" "$listen_value" "$NGINX_API_SERVER_NAMES_VALUE" "$NGINX_NEWAPI_UPSTREAM_VALUE" "$forwarded_proto" "" "" "300s"
+    fi
+  fi
+
+  if needs_cliproxy_config; then
+    if [[ "$ssl_enabled" == "true" ]]; then
+      append_nginx_proxy_server "$file" "2. 管理后台 (CPA / CLIProxyAPI)${suffix}" "$listen_value" "$NGINX_ADMIN_SERVER_NAME_VALUE" "$NGINX_CLIPROXY_UPSTREAM_VALUE" "$forwarded_proto" "$NGINX_ADMIN_CERT_VALUE" "$NGINX_ADMIN_KEY_VALUE" "600s" "600s"
+    else
+      append_nginx_proxy_server "$file" "2. 管理后台 (CPA / CLIProxyAPI)${suffix}" "$listen_value" "$NGINX_ADMIN_SERVER_NAME_VALUE" "$NGINX_CLIPROXY_UPSTREAM_VALUE" "$forwarded_proto" "" "" "600s" "600s"
+    fi
+  fi
+
+  if needs_sub2api_config; then
+    if [[ "$ssl_enabled" == "true" ]]; then
+      append_nginx_proxy_server "$file" "3. Sub2API${suffix}" "$listen_value" "$NGINX_SUB2API_SERVER_NAMES_VALUE" "$NGINX_SUB2API_UPSTREAM_VALUE" "$forwarded_proto" "$NGINX_SUB2API_CERT_VALUE" "$NGINX_SUB2API_KEY_VALUE" "600s"
+    else
+      append_nginx_proxy_server "$file" "3. Sub2API${suffix}" "$listen_value" "$NGINX_SUB2API_SERVER_NAMES_VALUE" "$NGINX_SUB2API_UPSTREAM_VALUE" "$forwarded_proto" "" "" "600s"
+    fi
+  fi
+
+  if needs_gpt_image_webui_config; then
+    if [[ "$ssl_enabled" == "true" ]]; then
+      append_nginx_proxy_server "$file" "4. GPT Image WebUI${suffix}" "$listen_value" "$NGINX_WEBUI_SERVER_NAMES_VALUE" "$NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE" "$forwarded_proto" "$NGINX_WEBUI_CERT_VALUE" "$NGINX_WEBUI_KEY_VALUE" "600s"
+    else
+      append_nginx_proxy_server "$file" "4. GPT Image WebUI${suffix}" "$listen_value" "$NGINX_WEBUI_SERVER_NAMES_VALUE" "$NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE" "$forwarded_proto" "" "" "600s"
+    fi
+  fi
+}
+
+write_nginx_conf() {
+  local active_conf="$STACK_DIR/nginx/conf.d/default.conf"
+  local redirect_target=""
+
+  if [[ "$NGINX_DEPLOY_MODE_VALUE" == "lan" ]]; then
+    write_nginx_conf_header "$active_conf" "局域网模式"
+    needs_newapi_config && append_nginx_proxy_server "$active_conf" "1. New API" "80 default_server" "_" "$NGINX_NEWAPI_UPSTREAM_VALUE" "http" "" "" "300s"
+    needs_cliproxy_config && append_nginx_proxy_server "$active_conf" "2. CPA / CLIProxyAPI" "8080 default_server" "_" "$NGINX_CLIPROXY_UPSTREAM_VALUE" "http" "" "" "600s" "600s"
+    needs_sub2api_config && append_nginx_proxy_server "$active_conf" "3. Sub2API" "8081 default_server" "_" "$NGINX_SUB2API_UPSTREAM_VALUE" "http" "" "" "600s"
+    needs_gpt_image_webui_config && append_nginx_proxy_server "$active_conf" "4. GPT Image WebUI" "8082 default_server" "_" "$NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE" "http" "" "" "600s"
     return
   fi
 
   if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
     if [[ "$NGINX_HTTP_TO_HTTPS_REDIRECT_VALUE" == "true" ]]; then
+      write_nginx_conf_header "$active_conf" "HTTP 自动跳转 HTTPS"
       if [[ "$NGINX_HTTPS_PORT_VALUE" == "443" ]]; then
-        cat > "$active_conf" <<NGINX
-# HTTP 自动跳转 HTTPS
-map \$http_upgrade \$connection_upgrade {
-    default upgrade;
-    '' close;
-}
-
-# 访问入口
-server {
-    listen 80;
-    server_name ${NGINX_HTTP_SERVER_NAMES_VALUE};
-
-    return 301 https://\$host\$request_uri;
-}
-
-# 1. API 服务 (New API)
-server {
-    listen 443 ssl;
-    server_name ${NGINX_API_SERVER_NAMES_VALUE};
-
-    ssl_certificate      /etc/nginx/certs/${NGINX_API_CERT_VALUE};
-    ssl_certificate_key  /etc/nginx/certs/${NGINX_API_KEY_VALUE};
-
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_NEWAPI_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
-    }
-}
-
-# 2. 管理后台 (CPA / CLIProxyAPI)
-server {
-    listen 443 ssl;
-    server_name ${NGINX_ADMIN_SERVER_NAME_VALUE};
-
-    ssl_certificate      /etc/nginx/certs/${NGINX_ADMIN_CERT_VALUE};
-    ssl_certificate_key  /etc/nginx/certs/${NGINX_ADMIN_KEY_VALUE};
-
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_CLIPROXY_UPSTREAM_VALUE};
-        proxy_connect_timeout 600s;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-    }
-}
-
-# 3. Sub2API
-server {
-    listen 443 ssl;
-    server_name ${NGINX_SUB2API_SERVER_NAMES_VALUE};
-
-    ssl_certificate      /etc/nginx/certs/${NGINX_SUB2API_CERT_VALUE};
-    ssl_certificate_key  /etc/nginx/certs/${NGINX_SUB2API_KEY_VALUE};
-
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_SUB2API_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-    }
-}
-
-# 4. GPT Image WebUI
-server {
-    listen 443 ssl;
-    server_name ${NGINX_WEBUI_SERVER_NAMES_VALUE};
-
-    ssl_certificate      /etc/nginx/certs/${NGINX_WEBUI_CERT_VALUE};
-    ssl_certificate_key  /etc/nginx/certs/${NGINX_WEBUI_KEY_VALUE};
-
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-    }
-}
-
-NGINX
+        redirect_target="https://\$host\$request_uri"
       else
-        cat > "$active_conf" <<NGINX
-# HTTP 自动跳转 HTTPS
-map \$http_upgrade \$connection_upgrade {
-    default upgrade;
-    '' close;
-}
+        redirect_target="https://\$host:${NGINX_HTTPS_PORT_VALUE}\$request_uri"
+      fi
+      cat >> "$active_conf" <<NGINX
 
 # 访问入口
 server {
     listen 80;
     server_name ${NGINX_HTTP_SERVER_NAMES_VALUE};
 
-    return 301 https://\$host:${NGINX_HTTPS_PORT_VALUE}\$request_uri;
-}
-
-# 1. API 服务 (New API)
-server {
-    listen 443 ssl;
-    server_name ${NGINX_API_SERVER_NAMES_VALUE};
-
-    ssl_certificate      /etc/nginx/certs/${NGINX_API_CERT_VALUE};
-    ssl_certificate_key  /etc/nginx/certs/${NGINX_API_KEY_VALUE};
-
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_NEWAPI_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
-    }
-}
-
-# 2. 管理后台 (CPA / CLIProxyAPI)
-server {
-    listen 443 ssl;
-    server_name ${NGINX_ADMIN_SERVER_NAME_VALUE};
-
-    ssl_certificate      /etc/nginx/certs/${NGINX_ADMIN_CERT_VALUE};
-    ssl_certificate_key  /etc/nginx/certs/${NGINX_ADMIN_KEY_VALUE};
-
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_CLIPROXY_UPSTREAM_VALUE};
-        proxy_connect_timeout 600s;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-    }
-}
-
-# 3. Sub2API
-server {
-    listen 443 ssl;
-    server_name ${NGINX_SUB2API_SERVER_NAMES_VALUE};
-
-    ssl_certificate      /etc/nginx/certs/${NGINX_SUB2API_CERT_VALUE};
-    ssl_certificate_key  /etc/nginx/certs/${NGINX_SUB2API_KEY_VALUE};
-
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_SUB2API_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-    }
-}
-
-# 4. GPT Image WebUI
-server {
-    listen 443 ssl;
-    server_name ${NGINX_WEBUI_SERVER_NAMES_VALUE};
-
-    ssl_certificate      /etc/nginx/certs/${NGINX_WEBUI_CERT_VALUE};
-    ssl_certificate_key  /etc/nginx/certs/${NGINX_WEBUI_KEY_VALUE};
-
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-    }
+    return 301 ${redirect_target};
 }
 NGINX
-      fi
-    else
-      cat > "$active_conf" <<NGINX
-# HTTP / HTTPS 双入口，不做强制跳转
-map \$http_upgrade \$connection_upgrade {
-    default upgrade;
-    '' close;
-}
-
-# 1. API 服务 (New API) - HTTP
-server {
-    listen 80;
-    server_name ${NGINX_API_SERVER_NAMES_VALUE};
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_NEWAPI_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto http;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
-    }
-}
-
-# 2. 管理后台 (CPA / CLIProxyAPI) - HTTP
-server {
-    listen 80;
-    server_name ${NGINX_ADMIN_SERVER_NAME_VALUE};
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_CLIPROXY_UPSTREAM_VALUE};
-        proxy_connect_timeout 600s;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto http;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-    }
-}
-
-# 3. Sub2API - HTTP
-server {
-    listen 80;
-    server_name ${NGINX_SUB2API_SERVER_NAMES_VALUE};
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_SUB2API_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto http;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-    }
-}
-
-# 4. GPT Image WebUI - HTTP
-server {
-    listen 80;
-    server_name ${NGINX_WEBUI_SERVER_NAMES_VALUE};
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto http;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-    }
-}
-
-# 5. API 服务 (New API) - HTTPS
-server {
-    listen 443 ssl;
-    server_name ${NGINX_API_SERVER_NAMES_VALUE};
-
-    ssl_certificate      /etc/nginx/certs/${NGINX_API_CERT_VALUE};
-    ssl_certificate_key  /etc/nginx/certs/${NGINX_API_KEY_VALUE};
-
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_NEWAPI_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
-    }
-}
-
-# 6. 管理后台 (CPA / CLIProxyAPI) - HTTPS
-server {
-    listen 443 ssl;
-    server_name ${NGINX_ADMIN_SERVER_NAME_VALUE};
-
-    ssl_certificate      /etc/nginx/certs/${NGINX_ADMIN_CERT_VALUE};
-    ssl_certificate_key  /etc/nginx/certs/${NGINX_ADMIN_KEY_VALUE};
-
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_CLIPROXY_UPSTREAM_VALUE};
-        proxy_connect_timeout 600s;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-    }
-}
-
-# 7. Sub2API - HTTPS
-server {
-    listen 443 ssl;
-    server_name ${NGINX_SUB2API_SERVER_NAMES_VALUE};
-
-    ssl_certificate      /etc/nginx/certs/${NGINX_SUB2API_CERT_VALUE};
-    ssl_certificate_key  /etc/nginx/certs/${NGINX_SUB2API_KEY_VALUE};
-
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_SUB2API_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-    }
-}
-
-# 8. GPT Image WebUI - HTTPS
-server {
-    listen 443 ssl;
-    server_name ${NGINX_WEBUI_SERVER_NAMES_VALUE};
-
-    ssl_certificate      /etc/nginx/certs/${NGINX_WEBUI_CERT_VALUE};
-    ssl_certificate_key  /etc/nginx/certs/${NGINX_WEBUI_KEY_VALUE};
-
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-    }
-}
-NGINX
+      append_selected_nginx_servers "$active_conf" "443 ssl" "https" "true"
+      return
     fi
+
+    write_nginx_conf_header "$active_conf" "HTTP / HTTPS 双入口，不做强制跳转"
+    append_selected_nginx_servers "$active_conf" "80" "http" "false" " - HTTP"
+    append_selected_nginx_servers "$active_conf" "443 ssl" "https" "true" " - HTTPS"
     return
   fi
 
-  cat > "$active_conf" <<NGINX
-# HTTP 模式
-map \$http_upgrade \$connection_upgrade {
-    default upgrade;
-    '' close;
-}
-
-# 1. API 服务 (New API)
-server {
-    listen 80;
-    server_name ${NGINX_API_SERVER_NAMES_VALUE};
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_NEWAPI_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto http;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
-    }
-}
-
-# 2. 管理后台 (CPA / CLIProxyAPI)
-server {
-    listen 80;
-    server_name ${NGINX_ADMIN_SERVER_NAME_VALUE};
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_CLIPROXY_UPSTREAM_VALUE};
-        proxy_connect_timeout 600s;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto http;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-    }
-}
-
-# 3. Sub2API
-server {
-    listen 80;
-    server_name ${NGINX_SUB2API_SERVER_NAMES_VALUE};
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_SUB2API_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto http;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-    }
-}
-
-# 4. GPT Image WebUI
-server {
-    listen 80;
-    server_name ${NGINX_WEBUI_SERVER_NAMES_VALUE};
-
-    client_max_body_size 0;
-
-    location / {
-        proxy_pass http://${NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto http;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 600s;
-        proxy_send_timeout 600s;
-    }
-}
-NGINX
+  write_nginx_conf_header "$active_conf" "HTTP 模式"
+  append_selected_nginx_servers "$active_conf" "80" "http" "false"
 }
 
 validate_nginx_certificates() {
@@ -2540,11 +2061,13 @@ validate_nginx_certificates() {
   needs_nginx_config || return 0
   [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" && "$NGINX_ENABLE_HTTPS" == "true" ]] || return 0
 
-  certs+=("$NGINX_API_CERT_VALUE" "$NGINX_API_KEY_VALUE")
-  if [[ "$NGINX_SHARE_CERT_VALUE" != "true" ]]; then
-    certs+=("$NGINX_ADMIN_CERT_VALUE" "$NGINX_ADMIN_KEY_VALUE")
-    certs+=("$NGINX_SUB2API_CERT_VALUE" "$NGINX_SUB2API_KEY_VALUE")
-    certs+=("$NGINX_WEBUI_CERT_VALUE" "$NGINX_WEBUI_KEY_VALUE")
+  if [[ "$NGINX_SHARE_CERT_VALUE" == "true" ]]; then
+    certs+=("$NGINX_API_CERT_VALUE" "$NGINX_API_KEY_VALUE")
+  else
+    needs_newapi_config && certs+=("$NGINX_API_CERT_VALUE" "$NGINX_API_KEY_VALUE")
+    needs_cliproxy_config && certs+=("$NGINX_ADMIN_CERT_VALUE" "$NGINX_ADMIN_KEY_VALUE")
+    needs_sub2api_config && certs+=("$NGINX_SUB2API_CERT_VALUE" "$NGINX_SUB2API_KEY_VALUE")
+    needs_gpt_image_webui_config && certs+=("$NGINX_WEBUI_CERT_VALUE" "$NGINX_WEBUI_KEY_VALUE")
   fi
 
   for file in "${certs[@]}"; do
@@ -2812,12 +2335,26 @@ YAML
 YAML
 
   if [[ "$NGINX_DEPLOY_MODE_VALUE" == "lan" ]]; then
-    cat >> "$compose_file" <<'YAML'
+    if needs_newapi_config; then
+      cat >> "$compose_file" <<'YAML'
       - "${NGINX_LAN_API_PORT:-80}:80"
+YAML
+    fi
+    if needs_cliproxy_config; then
+      cat >> "$compose_file" <<'YAML'
       - "${NGINX_LAN_ADMIN_PORT:-8080}:8080"
+YAML
+    fi
+    if needs_sub2api_config; then
+      cat >> "$compose_file" <<'YAML'
       - "${NGINX_LAN_SUB2API_PORT:-8081}:8081"
+YAML
+    fi
+    if needs_gpt_image_webui_config; then
+      cat >> "$compose_file" <<'YAML'
       - "${NGINX_LAN_WEBUI_PORT:-8082}:8082"
 YAML
+    fi
   else
     cat >> "$compose_file" <<'YAML'
       - "${NGINX_HTTP_PORT:-80}:80"
@@ -2843,10 +2380,21 @@ YAML
 
   cat >> "$compose_file" <<'YAML'
     depends_on:
+YAML
+  needs_newapi_config && cat >> "$compose_file" <<'YAML'
       - new-api
+YAML
+  needs_cliproxy_config && cat >> "$compose_file" <<'YAML'
       - cli-proxy-api
+YAML
+  needs_sub2api_config && cat >> "$compose_file" <<'YAML'
       - sub2api
+YAML
+  needs_gpt_image_webui_config && cat >> "$compose_file" <<'YAML'
       - gpt-image-2-webui
+YAML
+
+  cat >> "$compose_file" <<'YAML'
     networks:
       - public-net
 
@@ -2930,6 +2478,7 @@ run_compose() {
 
   if [[ "$DEPLOY_ALL" != "true" ]]; then
     args+=("${SELECTED_SERVICES[@]}")
+    args+=("nginx")
   fi
 
   section_title "执行部署"
@@ -2999,16 +2548,16 @@ print_summary() {
     section_title "Nginx 入口"
     if [[ "$NGINX_DEPLOY_MODE_VALUE" == "lan" ]]; then
       field_line "Nginx 模式：" "局域网，不需要域名。"
-      field_line "New API 入口端口：" "$NGINX_LAN_API_PORT_VALUE"
-      field_line "CPA 入口端口：" "$NGINX_LAN_ADMIN_PORT_VALUE"
-      field_line "Sub2API 入口端口：" "$NGINX_LAN_SUB2API_PORT_VALUE"
-      field_line "GPT Image WebUI 入口端口：" "$NGINX_LAN_WEBUI_PORT_VALUE"
+      needs_newapi_config && field_line "New API 入口端口：" "$NGINX_LAN_API_PORT_VALUE"
+      needs_cliproxy_config && field_line "CPA 入口端口：" "$NGINX_LAN_ADMIN_PORT_VALUE"
+      needs_sub2api_config && field_line "Sub2API 入口端口：" "$NGINX_LAN_SUB2API_PORT_VALUE"
+      needs_gpt_image_webui_config && field_line "GPT Image WebUI 入口端口：" "$NGINX_LAN_WEBUI_PORT_VALUE"
     else
       field_line "Nginx 模式：" "公网，按域名转发。"
-      field_line "New API 绑定域名：" "$NGINX_API_SERVER_NAMES_VALUE"
-      field_line "CPA 绑定域名：" "$NGINX_ADMIN_SERVER_NAME_VALUE"
-      field_line "Sub2API 绑定域名：" "$NGINX_SUB2API_SERVER_NAMES_VALUE"
-      field_line "GPT Image WebUI 绑定域名：" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
+      needs_newapi_config && field_line "New API 绑定域名：" "$NGINX_API_SERVER_NAMES_VALUE"
+      needs_cliproxy_config && field_line "CPA 绑定域名：" "$NGINX_ADMIN_SERVER_NAME_VALUE"
+      needs_sub2api_config && field_line "Sub2API 绑定域名：" "$NGINX_SUB2API_SERVER_NAMES_VALUE"
+      needs_gpt_image_webui_config && field_line "GPT Image WebUI 绑定域名：" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
       field_line "公网 HTTP 端口：" "$NGINX_HTTP_PORT_VALUE"
       if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
         field_line "公网 HTTPS 端口：" "$NGINX_HTTPS_PORT_VALUE"
@@ -3118,14 +2667,14 @@ print_summary() {
       field_line "私钥文件：" "$NGINX_API_KEY_VALUE"
     else
       field_line "共用证书：" "否"
-      field_line "New API 证书：" "$NGINX_API_CERT_VALUE"
-      field_line "New API 私钥：" "$NGINX_API_KEY_VALUE"
-      field_line "CPA 证书：" "$NGINX_ADMIN_CERT_VALUE"
-      field_line "CPA 私钥：" "$NGINX_ADMIN_KEY_VALUE"
-      field_line "Sub2API 证书：" "$NGINX_SUB2API_CERT_VALUE"
-      field_line "Sub2API 私钥：" "$NGINX_SUB2API_KEY_VALUE"
-      field_line "GPT Image WebUI 证书：" "$NGINX_WEBUI_CERT_VALUE"
-      field_line "GPT Image WebUI 私钥：" "$NGINX_WEBUI_KEY_VALUE"
+      needs_newapi_config && field_line "New API 证书：" "$NGINX_API_CERT_VALUE"
+      needs_newapi_config && field_line "New API 私钥：" "$NGINX_API_KEY_VALUE"
+      needs_cliproxy_config && field_line "CPA 证书：" "$NGINX_ADMIN_CERT_VALUE"
+      needs_cliproxy_config && field_line "CPA 私钥：" "$NGINX_ADMIN_KEY_VALUE"
+      needs_sub2api_config && field_line "Sub2API 证书：" "$NGINX_SUB2API_CERT_VALUE"
+      needs_sub2api_config && field_line "Sub2API 私钥：" "$NGINX_SUB2API_KEY_VALUE"
+      needs_gpt_image_webui_config && field_line "GPT Image WebUI 证书：" "$NGINX_WEBUI_CERT_VALUE"
+      needs_gpt_image_webui_config && field_line "GPT Image WebUI 私钥：" "$NGINX_WEBUI_KEY_VALUE"
     fi
   fi
 }

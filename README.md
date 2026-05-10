@@ -181,37 +181,37 @@ bash one-click/deploy.sh deploy
 all
 1
 2
-12345
+1234
 1 2
 1,2
-nginx new-api sub2api webui
+new-api sub2api webui
 ```
 
 服务编号含义：
 
 ```text
-1 = nginx
-2 = new-api，自动带 PostgreSQL + Redis
-3 = cli-proxy-api
-4 = sub2api，自动带独立 PostgreSQL + Redis
-5 = gpt-image-2-webui
+Nginx 默认作为统一网关必装，不需要选择。
+1 = new-api，自动带 PostgreSQL + Redis
+2 = cli-proxy-api
+3 = sub2api，自动带独立 PostgreSQL + Redis
+4 = gpt-image-2-webui
 ```
 
 常用选择：
 
 - `all`：部署全部服务
-- `1`：启用 Nginx 统一代理，并拉起它代理的应用服务
-- `2`：只部署 New API
-- `3`：只部署 CPA / CLIProxyAPI
-- `4`：只部署 Sub2API
-- `5`：只部署 GPT Image WebUI
-- `23`：部署 New API + CPA，不启用 Nginx
-- `24`：部署 New API + Sub2API，不启用 Nginx
-- `12345`：部署 Nginx + New API + CPA + Sub2API + GPT Image WebUI
+- `1`：只部署 New API，并生成对应 Nginx 入口
+- `2`：只部署 CPA / CLIProxyAPI，并生成对应 Nginx 入口
+- `3`：只部署 Sub2API，并生成对应 Nginx 入口
+- `4`：只部署 GPT Image WebUI，并生成对应 Nginx 入口
+- `12`：部署 New API + CPA
+- `13`：部署 New API + Sub2API
+- `124`：部署 New API + CPA + GPT Image WebUI
+- `1234`：部署 New API + CPA + Sub2API + GPT Image WebUI
 
 ### 4.4 局域网部署
 
-选择 Nginx 后，部署模式输入：
+Nginx 默认必装。部署模式输入：
 
 ```text
 1 = 局域网
@@ -385,10 +385,11 @@ docker compose down -v --remove-orphans
 
 - Debian 12 Docker 安装菜单只自动支持 Debian 12。
 - 配置 Docker 镜像源会修改 `/etc/docker/daemon.json`。
-- 选择 Nginx 后，New API、CPA、Sub2API 和 GPT Image WebUI 默认不暴露宿主机端口，只通过 Nginx 代理访问。
+- Nginx 默认必装；New API、CPA、Sub2API 和 GPT Image WebUI 默认不暴露宿主机端口，只通过 Nginx 代理访问。
 - PostgreSQL 和 Redis 是 New API / Sub2API 的依赖，不需要在服务选择里单独选择。
 - New API、CPA、Sub2API 和 GPT Image WebUI 应用容器都会加入 `public-net`；默认情况下它对应外部 Docker 网络 `app-net`。
 - Sub2API 的 PostgreSQL 和 Redis 只加入独立内部网络，不暴露给宿主机。
+- GPT Image WebUI 的 `generated-images/` 和 `logs/` 会自动设置为容器可写，避免非 root 容器用户写入图片时报权限错误。
 - `SESSION_SECRET` 和 `CRYPTO_SECRET` 是 New API 内部密钥，不是后台登录密码。
 - 阿里云 `Ali_Key` / `Ali_Secret` 不要公开，泄露后请立即禁用或轮换。
 - 公网 HTTPS 推荐使用泛域名证书，New API、CPA、Sub2API 和 GPT Image WebUI 可以共用同一张证书。
