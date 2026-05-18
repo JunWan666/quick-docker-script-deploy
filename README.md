@@ -3,7 +3,7 @@
   <p><strong>Docker / nginx / new-api / newapi-v2 / cli-proxy-api / sub2api / gpt-image-2-webui / gemini-image-desk / PostgreSQL / Redis</strong></p>
   <p>一个交互式 Shell 脚本，从 Docker 环境准备到服务部署、证书、更新和 Nginx 运维都集中到一个入口。</p>
   <p>
-    <img src="https://img.shields.io/badge/Debian-12-A81D33?style=for-the-badge&logo=debian&logoColor=white" alt="Debian 12" />
+    <img src="https://img.shields.io/badge/Linux-Docker-333333?style=for-the-badge&logo=linux&logoColor=white" alt="Linux Docker" />
     <img src="https://img.shields.io/badge/Shell-Bash-4EAA25?style=for-the-badge&logo=gnubash&logoColor=white" alt="Bash" />
     <img src="https://img.shields.io/badge/Docker-Engine-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker Engine" />
     <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker Compose" />
@@ -22,7 +22,7 @@
 
 `one-click/deploy.sh` 是一个面向 Docker Compose 的一键部署和运维脚本，主要用于部署 `nginx`、旧版 `new-api`、新版 `newapi-v2`、`cli-proxy-api`、`sub2api`、`gpt-image-2-webui` 和 `gemini-image-desk`。
 
-- Debian 12 一键安装/检查 Docker
+- Linux 通用安装/检查 Docker，优先使用 Docker 官方软件源，必要时可回退到官方 `get.docker.com` 便捷脚本
 - 固定使用 `/opt/ai-api-stack/` 作为安装和运维目录
 - 自动生成根 `docker-compose.yml`、`.env`、`nginx/conf.d/default.conf`
 - 根 `docker-compose.yml` 只包含本次选择的服务；每个已选服务目录内也会生成对应的 `docker-compose.yml`
@@ -40,7 +40,7 @@
 
 ## 2. 推荐顺序
 
-全新的 Debian 12 服务器建议按这个顺序来：
+全新的 Linux 服务器建议按这个顺序来：
 
 ```text
 1. 安装/检查 Docker
@@ -96,7 +96,7 @@ bash one-click/deploy.sh
 主菜单会显示：
 
 ```text
-1  Debian 12 安装/检查 Docker
+1  通用安装/检查 Docker
 2  SSL 证书 / acme.sh
 3  一键部署
 4  更新服务镜像/容器
@@ -122,7 +122,7 @@ bash one-click/deploy.sh uninstall
 
 ## 4. 功能教程
 
-### 4.1 Debian 12 安装 Docker
+### 4.1 通用安装 Docker
 
 运行：
 
@@ -133,8 +133,11 @@ bash one-click/deploy.sh docker
 这个菜单会：
 
 - 检查当前 Docker 和 Docker Compose 状态
-- 仅在 Debian 12 上执行自动安装流程
-- 使用 Docker 官方 Debian 仓库安装 Docker Engine
+- 识别当前 Linux 发行版和架构
+- Debian / Ubuntu 使用 Docker 官方 apt 仓库安装 Docker Engine
+- CentOS / RHEL / Fedora 使用 Docker 官方 rpm 仓库安装 Docker Engine
+- Rocky / AlmaLinux / Oracle Linux 默认按 CentOS 兼容仓库处理
+- 未匹配到内置流程时，可改用 Docker 官方 `get.docker.com` 便捷脚本兜底
 - 安装 `docker-ce`、`docker-ce-cli`、`containerd.io`
 - 安装 `docker-buildx-plugin` 和 `docker-compose-plugin`
 - 启动并设置 Docker 开机自启
@@ -353,9 +356,9 @@ bash one-click/deploy.sh misc
 
 当前包含：
 
-- 启用 Bash/ls 颜色：备份当前用户的 `~/.bashrc`，启用 Debian 常见颜色配置，并追加幂等的颜色配置块。
+- 启用 Bash/ls 颜色：备份当前用户的 `~/.bashrc`，启用常见颜色配置，并追加幂等的颜色配置块。
 
-修改后重新登录 SSH，或执行 `source ~/.bashrc` 生效。
+修改后脚本会自动执行 `source ~/.bashrc`。包括 root 在内，如果脚本是普通方式执行，子进程无法直接修改父级 SSH Shell，脚本会自动进入一个已加载配置的新 Bash；输入 `exit` 可回到原来的 Shell。
 
 ### 4.10 卸载部署
 
@@ -414,7 +417,7 @@ docker compose down -v --remove-orphans
 
 ## 6. 注意事项
 
-- Debian 12 Docker 安装菜单只自动支持 Debian 12。
+- Docker 安装菜单优先使用官方软件源；未内置的 Linux 发行版可选择 Docker 官方 `get.docker.com` 便捷脚本兜底。
 - 配置 Docker 镜像源会修改 `/etc/docker/daemon.json`。
 - Nginx 默认必装；New API、CPA、Sub2API、GPT Image WebUI 和 Gemini Image Desk 默认不暴露宿主机端口，只通过 Nginx 代理访问。
 - PostgreSQL 和 Redis 是旧版 New API / 新版 NewAPI / Sub2API 的依赖，不需要在服务选择里单独选择。

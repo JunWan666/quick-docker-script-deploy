@@ -279,7 +279,7 @@ field_line() {
 
 show_main_menu() {
   section_title "主菜单"
-  menu_option "$COLOR_GREEN" "[1]" "Debian 12 安装/检查 Docker"
+  menu_option "$COLOR_GREEN" "[1]" "通用安装/检查 Docker"
   menu_option "$COLOR_MAGENTA" "[2]" "SSL 证书 / acme.sh"
   menu_option "$COLOR_BLUE" "[3]" "一键部署"
   menu_option "$COLOR_GREEN" "[4]" "更新服务镜像/容器"
@@ -1192,20 +1192,6 @@ run_root() {
   sudo "$@"
 }
 
-is_debian12() {
-  local id=""
-  local version_id=""
-
-  [[ -r /etc/os-release ]] || return 1
-
-  # shellcheck disable=SC1091
-  . /etc/os-release
-  id="${ID:-}"
-  version_id="${VERSION_ID:-}"
-
-  [[ "$id" == "debian" && "${version_id%%.*}" == "12" ]]
-}
-
 show_docker_versions() {
   if command -v docker >/dev/null 2>&1; then
     field_line "Docker：" "$(docker --version 2>/dev/null || printf '已安装')"
@@ -1220,12 +1206,214 @@ show_docker_versions() {
   fi
 }
 
-install_docker_debian12() {
+show_linux_os_info() {
+  local pretty_name=""
+  local os_id=""
+  local version_id=""
+
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    pretty_name="${PRETTY_NAME:-}"
+    os_id="${ID:-}"
+    version_id="${VERSION_ID:-}"
+  fi
+
+  [[ -n "$pretty_name" ]] || pretty_name="$(uname -s 2>/dev/null || printf 'Unknown')"
+  field_line "系统：" "$pretty_name"
+  [[ -n "$os_id" ]] && field_line "发行版 ID：" "$os_id"
+  [[ -n "$version_id" ]] && field_line "版本：" "$version_id"
+  field_line "架构：" "$(uname -m 2>/dev/null || printf 'unknown')"
+}
+
+run_official_docker_repo_installer() {
+  run_root bash -s <<'ROOT'
+set -Eeuo pipefail
+
+install_apt_docker() {
+  local repo_id="$1"
+  local suite="$2"
+  local arch=""
+  local conflicting_packages=()
+  local pkg=""
+
+  [[ -n "$suite" ]] || {
+    printf '未能识别 apt 仓库发行版代号，无法使用官方 apt 仓库。\n' >&2
+    exit 42
+  }
+
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y ca-certificates curl gnupg
+
+  for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do
+    if dpkg -s "$pkg" >/dev/null 2>&1; then
+      conflicting_packages+=("$pkg")
+    fi
+  done
+
+  if [[ "${#conflicting_packages[@]}" -gt 0 ]]; then
+    apt-get remove -y "${conflicting_packages[@]}" || true
+  fi
+
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL "https://download.docker.com/linux/${repo_id}/gpg" -o /etc/apt/keyrings/docker.asc
+  chmod a+r /etc/apt/keyrings/docker.asc
+  arch="$(dpkg --print-architecture)"
+
+  cat > /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/${repo_id}
+Suites: ${suite}
+Components: stable
+Architectures: ${arch}
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+
+  apt-get update
+  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+}
+
+install_rpm_docker() {
+  local repo_id="$1"
+  local pkg_mgr=""
+  local repo_url="https://download.docker.com/linux/${repo_id}/docker-ce.repo"
+  local repo_file="/etc/yum.repos.d/docker-ce.repo"
+
+  if command -v dnf >/dev/null 2>&1; then
+    pkg_mgr="dnf"
+  elif command -v yum >/dev/null 2>&1; then
+    pkg_mgr="yum"
+  else
+    printf '未检测到 dnf/yum，无法使用官方 rpm 仓库。\n' >&2
+    exit 42
+  fi
+
+  "$pkg_mgr" remove -y docker docker-client docker-client-latest docker-common docker-latest \
+    docker-latest-logrotate docker-logrotate docker-engine podman-docker containerd runc || true
+
+  if [[ "$pkg_mgr" == "dnf" ]]; then
+    "$pkg_mgr" install -y dnf-plugins-core ca-certificates curl
+  else
+    "$pkg_mgr" install -y yum-utils ca-certificates curl
+  fi
+
+  if ! "$pkg_mgr" config-manager --add-repo "$repo_url"; then
+    mkdir -p /etc/yum.repos.d
+    curl -fsSL "$repo_url" -o "$repo_file"
+  fi
+
+  "$pkg_mgr" install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+}
+
+start_docker_service() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl enable --now docker
+  elif command -v service >/dev/null 2>&1; then
+    service docker start
+  else
+    printf '未检测到 systemctl/service，请手动启动 Docker 服务。\n' >&2
+  fi
+}
+
+[[ "$(uname -s 2>/dev/null || true)" == "Linux" ]] || {
+  printf '当前不是 Linux 系统，无法自动安装 Docker Engine。\n' >&2
+  exit 42
+}
+
+[[ -r /etc/os-release ]] || {
+  printf '未找到 /etc/os-release，无法识别 Linux 发行版。\n' >&2
+  exit 42
+}
+
+# shellcheck disable=SC1091
+. /etc/os-release
+
+case "${ID:-}" in
+  debian)
+    install_apt_docker "debian" "${VERSION_CODENAME:-}"
+    ;;
+  ubuntu)
+    install_apt_docker "ubuntu" "${VERSION_CODENAME:-${UBUNTU_CODENAME:-}}"
+    ;;
+  centos)
+    install_rpm_docker "centos"
+    ;;
+  rhel)
+    install_rpm_docker "rhel"
+    ;;
+  fedora)
+    install_rpm_docker "fedora"
+    ;;
+  rocky|almalinux|ol|oraclelinux)
+    install_rpm_docker "centos"
+    ;;
+  *)
+    printf '未内置 %s 的官方仓库安装流程。\n' "${PRETTY_NAME:-${ID:-unknown}}" >&2
+    exit 42
+    ;;
+esac
+
+start_docker_service
+ROOT
+}
+
+run_docker_convenience_installer() {
+  run_root bash -s <<'ROOT'
+set -Eeuo pipefail
+
+ensure_curl() {
+  if command -v curl >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y ca-certificates curl
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y ca-certificates curl
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y ca-certificates curl
+  elif command -v zypper >/dev/null 2>&1; then
+    zypper --non-interactive install ca-certificates curl
+  else
+    printf '未检测到可用包管理器安装 curl，请先手动安装 curl。\n' >&2
+    exit 1
+  fi
+}
+
+start_docker_service() {
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl enable --now docker || true
+  elif command -v service >/dev/null 2>&1; then
+    service docker start || true
+  fi
+}
+
+tmp_script="$(mktemp)"
+trap 'rm -f "$tmp_script"' EXIT
+
+ensure_curl
+curl -fsSL https://get.docker.com -o "$tmp_script"
+sh "$tmp_script"
+start_docker_service
+ROOT
+}
+
+install_docker_universal() {
   local reinstall="false"
   local add_user_to_group="true"
   local target_user="${SUDO_USER:-}"
+  local install_status=0
+  local use_convenience="true"
 
-  section_title "Debian 12 安装/检查 Docker"
+  if [[ -z "$target_user" && "$(id -u)" -ne 0 ]]; then
+    target_user="$(id -un 2>/dev/null || true)"
+  fi
+
+  section_title "通用安装/检查 Docker"
+  show_linux_os_info
   show_docker_versions
 
   if command -v docker >/dev/null 2>&1; then
@@ -1233,49 +1421,29 @@ install_docker_debian12() {
     [[ "$reinstall" == "true" ]] || return 0
   fi
 
-  if ! is_debian12; then
-    die "此菜单只自动支持 Debian 12。如果是其它系统，请先手动安装 Docker。"
+  subtle_note "将优先使用 Docker 官方软件源安装 docker-ce、compose plugin、buildx plugin。"
+  set +e
+  run_official_docker_repo_installer
+  install_status="$?"
+  set -e
+
+  if (( install_status != 0 )); then
+    if [[ "$install_status" == "42" ]]; then
+      subtle_note "当前系统没有匹配到内置的官方仓库安装流程。"
+    else
+      subtle_note "Docker 官方软件源安装流程失败，退出码：$install_status"
+    fi
+
+    if [[ -t 0 ]]; then
+      read_yes_no use_convenience "是否改用 Docker 官方 get.docker.com 便捷脚本安装" "$use_convenience"
+    else
+      subtle_note "非交互环境下将自动改用 Docker 官方 get.docker.com 便捷脚本。"
+    fi
+
+    [[ "$use_convenience" == "true" ]] || die "已取消 Docker 安装。"
+    subtle_note "将下载并执行 Docker 官方便捷脚本：https://get.docker.com"
+    run_docker_convenience_installer
   fi
-
-  subtle_note "将使用 Docker 官方 Debian 仓库安装 docker-ce、compose plugin、buildx plugin。"
-  run_root bash -s <<'ROOT'
-set -Eeuo pipefail
-export DEBIAN_FRONTEND=noninteractive
-
-source /etc/os-release
-
-apt-get update
-apt-get install -y ca-certificates curl gnupg
-
-conflicting_packages=()
-for pkg in docker.io docker-compose docker-doc podman-docker containerd runc; do
-  if dpkg -s "$pkg" >/dev/null 2>&1; then
-    conflicting_packages+=("$pkg")
-  fi
-done
-
-if [[ "${#conflicting_packages[@]}" -gt 0 ]]; then
-  apt-get remove -y "${conflicting_packages[@]}" || true
-fi
-
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-chmod a+r /etc/apt/keyrings/docker.asc
-
-cat > /etc/apt/sources.list.d/docker.sources <<EOF
-Types: deb
-URIs: https://download.docker.com/linux/debian
-Suites: ${VERSION_CODENAME}
-Components: stable
-Architectures: $(dpkg --print-architecture)
-Signed-By: /etc/apt/keyrings/docker.asc
-EOF
-
-apt-get update
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-systemctl enable --now docker
-ROOT
 
   if [[ -n "$target_user" && "$target_user" != "root" ]]; then
     read_yes_no add_user_to_group "是否将用户 ${target_user} 加入 docker 组" "$add_user_to_group"
@@ -3777,6 +3945,37 @@ show_misc_menu() {
   menu_option "$COLOR_DIM" "[2]" "返回/退出"
 }
 
+reload_bashrc_now() {
+  local bashrc="$1"
+
+  if [[ ! -r "$bashrc" ]]; then
+    subtle_note "未能读取 $bashrc，跳过自动 source。"
+    return 0
+  fi
+
+  set +u
+  # shellcheck disable=SC1090
+  if source "$bashrc"; then
+    field_line "自动执行：" "source $bashrc"
+  else
+    subtle_note "自动 source $bashrc 时返回非 0；配置文件已写入，可以重新登录后生效。"
+  fi
+  set -Eeuo pipefail
+
+  if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    subtle_note "当前脚本以 source 方式运行，配置已作用到当前 Shell。"
+    return 0
+  fi
+
+  if [[ -t 0 && -t 1 ]] && command -v bash >/dev/null 2>&1; then
+    subtle_note "包括 root 在内，普通执行脚本时子进程都无法直接修改父级 SSH Shell。"
+    subtle_note "现在自动进入一个已加载该配置的新 Bash，无需手动复制 source 命令；输入 exit 可回到原来的 Shell。"
+    exec bash --rcfile "$bashrc" -i
+  fi
+
+  subtle_note "当前不是交互式终端，已跳过自动进入新 Bash。"
+}
+
 enable_bash_colors() {
   local target_home="${HOME:-}"
   local bashrc=""
@@ -3842,7 +4041,7 @@ BASHRC
   fi
 
   field_line "配置文件：" "$bashrc"
-  subtle_note "重新登录 SSH，或执行 source ~/.bashrc 后生效。"
+  reload_bashrc_now "$bashrc"
 }
 
 manage_misc() {
@@ -3981,7 +4180,7 @@ main() {
 
   case "$action" in
     docker)
-      install_docker_debian12
+      install_docker_universal
       return 0
       ;;
     mirror)
