@@ -42,6 +42,25 @@ POSTGRES_DB_VALUE="new-api"
 
 REDIS_IMAGE_VALUE="redis:7-alpine"
 
+NEWAPI_V2_IMAGE_VALUE="tannic666/newapi:latest"
+NEWAPI_V2_PUBLISH_HOST_PORT_VALUE=false
+NEWAPI_V2_HOST_PORT_VALUE="3002"
+NEWAPI_V2_SESSION_SECRET_VALUE=""
+NEWAPI_V2_CRYPTO_SECRET_VALUE=""
+NEWAPI_V2_ERROR_LOG_ENABLED_VALUE="true"
+NEWAPI_V2_BATCH_UPDATE_ENABLED_VALUE="true"
+NEWAPI_V2_MAX_REQUEST_BODY_MB_VALUE="10240"
+NEWAPI_V2_MAX_FILE_DOWNLOAD_MB_VALUE="10240"
+NEWAPI_V2_NODE_NAME_VALUE="newapi-v2-node-1"
+
+NEWAPI_V2_POSTGRES_IMAGE_VALUE="postgres:15"
+NEWAPI_V2_POSTGRES_USER_VALUE="newapi_v2"
+NEWAPI_V2_POSTGRES_PASSWORD_VALUE=""
+NEWAPI_V2_POSTGRES_DB_VALUE="newapi_v2"
+
+NEWAPI_V2_REDIS_IMAGE_VALUE="redis:7-alpine"
+NEWAPI_V2_REDIS_PASSWORD_VALUE=""
+
 CLIPROXY_IMAGE_VALUE="eceasy/cli-proxy-api:latest"
 CLIPROXY_DEPLOY_VALUE=""
 CLIPROXY_PUBLISH_HOST_PORTS_VALUE=false
@@ -86,6 +105,13 @@ GPT_IMAGE_WEBUI_CLEANUP_RUN_ON_START_VALUE="true"
 GPT_IMAGE_WEBUI_CLEANUP_DRY_RUN_VALUE="false"
 GPT_IMAGE_WEBUI_CLEANUP_LOG_FILE_VALUE="/app/logs/cleanup-generated-images.log"
 
+GEMINI_IMAGE_DESK_IMAGE_VALUE="tannic666/gemini-image-desk:latest"
+GEMINI_IMAGE_DESK_PUBLISH_HOST_PORT_VALUE=false
+GEMINI_IMAGE_DESK_HOST_PORT_VALUE="3003"
+GEMINI_IMAGE_DESK_BASE_URL_VALUE="https://generativelanguage.googleapis.com"
+GEMINI_IMAGE_DESK_DEFAULT_MODEL_VALUE="gemini-2.5-flash-image"
+GEMINI_IMAGE_DESK_PUBLIC_BASE_URL_CONFIG_VALUE="false"
+
 NGINX_IMAGE_VALUE="nginx:alpine"
 NGINX_DEPLOY_MODE_VALUE="lan"
 NGINX_ENABLE_HTTPS=false
@@ -97,11 +123,15 @@ NGINX_LAN_API_PORT_VALUE="80"
 NGINX_LAN_ADMIN_PORT_VALUE="8080"
 NGINX_LAN_SUB2API_PORT_VALUE="8081"
 NGINX_LAN_WEBUI_PORT_VALUE="8082"
-NGINX_HTTP_SERVER_NAMES_VALUE="example.com www.example.com api.example.com admin.example.com sub.example.com image.example.com"
+NGINX_LAN_NEWAPI_V2_PORT_VALUE="8083"
+NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE="8084"
+NGINX_HTTP_SERVER_NAMES_VALUE="example.com www.example.com api.example.com admin.example.com sub.example.com image.example.com newapi.example.com gemini.example.com"
 NGINX_API_SERVER_NAMES_VALUE="example.com www.example.com api.example.com"
 NGINX_ADMIN_SERVER_NAME_VALUE="admin.example.com"
 NGINX_SUB2API_SERVER_NAMES_VALUE="sub.example.com"
 NGINX_WEBUI_SERVER_NAMES_VALUE="image.example.com"
+NGINX_NEWAPI_V2_SERVER_NAMES_VALUE="newapi.example.com"
+NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE="gemini.example.com"
 NGINX_API_CERT_VALUE="fullchain.cer"
 NGINX_API_KEY_VALUE="example.com.key"
 NGINX_ADMIN_CERT_VALUE="fullchain.cer"
@@ -110,10 +140,16 @@ NGINX_SUB2API_CERT_VALUE="fullchain.cer"
 NGINX_SUB2API_KEY_VALUE="example.com.key"
 NGINX_WEBUI_CERT_VALUE="fullchain.cer"
 NGINX_WEBUI_KEY_VALUE="example.com.key"
+NGINX_NEWAPI_V2_CERT_VALUE="fullchain.cer"
+NGINX_NEWAPI_V2_KEY_VALUE="example.com.key"
+NGINX_GEMINI_IMAGE_DESK_CERT_VALUE="fullchain.cer"
+NGINX_GEMINI_IMAGE_DESK_KEY_VALUE="example.com.key"
 NGINX_NEWAPI_UPSTREAM_VALUE="new-api:3000"
 NGINX_CLIPROXY_UPSTREAM_VALUE="cli-proxy-api:8317"
 NGINX_SUB2API_UPSTREAM_VALUE="sub2api:8080"
 NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE="gpt-image-2-webui:3000"
+NGINX_NEWAPI_V2_UPSTREAM_VALUE="newapi-v2:3000"
+NGINX_GEMINI_IMAGE_DESK_UPSTREAM_VALUE="gemini-image-desk:3000"
 
 die() {
   printf '错误：%s\n' "$*" >&2
@@ -219,7 +255,7 @@ banner() {
     banner_line '/_/ |_/___/   /_/ |_/_/  /___/   /___/\__/\_,_/\__/_/\_\'
   fi
   printf '%s\n' "$(color_text "${COLOR_BOLD}${COLOR_GREEN}" "AI API Stack 一键部署脚本")"
-  printf '%s\n' "$(color_text "$COLOR_DIM" "Nginx + New API + CLIProxyAPI + Sub2API + GPT Image WebUI + PostgreSQL + Redis")"
+  printf '%s\n' "$(color_text "$COLOR_DIM" "Nginx + New API + NewAPI v2 + CLIProxyAPI + Sub2API + GPT Image WebUI + Gemini Image Desk + PostgreSQL + Redis")"
   printf '%s\n' "$(color_text "$COLOR_DIM" "Docker / 证书 / 部署 / 更新 / Nginx 管理 / 镜像源 / 杂项 / 卸载")"
   rule "=" 72
 }
@@ -406,8 +442,16 @@ ensure_available_port() {
 }
 
 resolve_publish_ports() {
+  local skip_port=""
+
   if needs_newapi_config && [[ "$NEWAPI_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
     ensure_available_port NEWAPI_HOST_PORT_VALUE "New API 直连" 3000
+  fi
+
+  if needs_newapi_v2_config && [[ "$NEWAPI_V2_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+    skip_port=""
+    needs_newapi_config && skip_port="$NEWAPI_HOST_PORT_VALUE"
+    ensure_available_port NEWAPI_V2_HOST_PORT_VALUE "新版 NewAPI 直连" 3002 "$skip_port"
   fi
 
   if needs_cliproxy_config && [[ "$CLIPROXY_PUBLISH_HOST_PORTS_VALUE" == "true" ]]; then
@@ -427,6 +471,12 @@ resolve_publish_ports() {
     ensure_available_port GPT_IMAGE_WEBUI_HOST_PORT_VALUE "GPT Image WebUI 直连" 3001 "$SUB2API_HOST_PORT_VALUE"
   fi
 
+  if needs_gemini_image_desk_config && [[ "$GEMINI_IMAGE_DESK_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+    skip_port=""
+    needs_gpt_image_webui_config && skip_port="$GPT_IMAGE_WEBUI_HOST_PORT_VALUE"
+    ensure_available_port GEMINI_IMAGE_DESK_HOST_PORT_VALUE "Gemini Image Desk 直连" 3003 "$skip_port"
+  fi
+
   if ! needs_nginx_config; then
     return
   fi
@@ -443,6 +493,16 @@ resolve_publish_ports() {
     fi
     if needs_gpt_image_webui_config; then
       ensure_available_port NGINX_LAN_WEBUI_PORT_VALUE "Nginx 局域网 GPT Image WebUI 入口" 18083 "$NGINX_LAN_SUB2API_PORT_VALUE"
+    fi
+    if needs_newapi_v2_config; then
+      skip_port=""
+      needs_gpt_image_webui_config && skip_port="$NGINX_LAN_WEBUI_PORT_VALUE"
+      ensure_available_port NGINX_LAN_NEWAPI_V2_PORT_VALUE "Nginx 局域网新版 NewAPI 入口" 18084 "$skip_port"
+    fi
+    if needs_gemini_image_desk_config; then
+      skip_port=""
+      needs_newapi_v2_config && skip_port="$NGINX_LAN_NEWAPI_V2_PORT_VALUE"
+      ensure_available_port NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE "Nginx 局域网 Gemini Image Desk 入口" 18085 "$skip_port"
     fi
   else
     ensure_available_port NGINX_HTTP_PORT_VALUE "Nginx 公网 HTTP 入口" 18080
@@ -513,7 +573,7 @@ use_fixed_stack_dir() {
 
 show_stack_dir_notice() {
   field_line "固定安装目录：" "$STACK_DIR"
-  subtle_note "脚本会始终在该目录生成和读取 docker-compose.yml、.env、Nginx 配置、证书和数据目录。"
+  subtle_note "脚本会在该目录生成根 docker-compose.yml、.env、Nginx 配置，并只为已选服务创建目录和服务 compose 文件。"
 }
 
 ensure_stack_dir_writable() {
@@ -610,6 +670,23 @@ load_existing_env_defaults() {
   load_env_default "$env_file" "POSTGRES_DB" POSTGRES_DB_VALUE
   load_env_default "$env_file" "REDIS_IMAGE" REDIS_IMAGE_VALUE
 
+  load_env_default "$env_file" "NEWAPI_V2_IMAGE" NEWAPI_V2_IMAGE_VALUE
+  load_env_default "$env_file" "NEWAPI_V2_PUBLISH_HOST_PORT" NEWAPI_V2_PUBLISH_HOST_PORT_VALUE
+  load_env_default "$env_file" "NEWAPI_V2_HOST_PORT" NEWAPI_V2_HOST_PORT_VALUE
+  load_env_default "$env_file" "NEWAPI_V2_SESSION_SECRET" NEWAPI_V2_SESSION_SECRET_VALUE
+  load_env_default "$env_file" "NEWAPI_V2_CRYPTO_SECRET" NEWAPI_V2_CRYPTO_SECRET_VALUE
+  load_env_default "$env_file" "NEWAPI_V2_ERROR_LOG_ENABLED" NEWAPI_V2_ERROR_LOG_ENABLED_VALUE
+  load_env_default "$env_file" "NEWAPI_V2_BATCH_UPDATE_ENABLED" NEWAPI_V2_BATCH_UPDATE_ENABLED_VALUE
+  load_env_default "$env_file" "NEWAPI_V2_MAX_REQUEST_BODY_MB" NEWAPI_V2_MAX_REQUEST_BODY_MB_VALUE
+  load_env_default "$env_file" "NEWAPI_V2_MAX_FILE_DOWNLOAD_MB" NEWAPI_V2_MAX_FILE_DOWNLOAD_MB_VALUE
+  load_env_default "$env_file" "NEWAPI_V2_NODE_NAME" NEWAPI_V2_NODE_NAME_VALUE
+  load_env_default "$env_file" "NEWAPI_V2_POSTGRES_IMAGE" NEWAPI_V2_POSTGRES_IMAGE_VALUE
+  load_env_default "$env_file" "NEWAPI_V2_POSTGRES_USER" NEWAPI_V2_POSTGRES_USER_VALUE
+  load_env_default "$env_file" "NEWAPI_V2_POSTGRES_PASSWORD" NEWAPI_V2_POSTGRES_PASSWORD_VALUE
+  load_env_default "$env_file" "NEWAPI_V2_POSTGRES_DB" NEWAPI_V2_POSTGRES_DB_VALUE
+  load_env_default "$env_file" "NEWAPI_V2_REDIS_IMAGE" NEWAPI_V2_REDIS_IMAGE_VALUE
+  load_env_default "$env_file" "NEWAPI_V2_REDIS_PASSWORD" NEWAPI_V2_REDIS_PASSWORD_VALUE
+
   load_env_default "$env_file" "CLIPROXY_IMAGE" CLIPROXY_IMAGE_VALUE
   load_env_default "$env_file" "CLIPROXY_DEPLOY" CLIPROXY_DEPLOY_VALUE
   load_env_default "$env_file" "CLIPROXY_PUBLISH_HOST_PORTS" CLIPROXY_PUBLISH_HOST_PORTS_VALUE
@@ -654,6 +731,13 @@ load_existing_env_defaults() {
   load_env_default "$env_file" "GPT_IMAGE_WEBUI_CLEANUP_DRY_RUN" GPT_IMAGE_WEBUI_CLEANUP_DRY_RUN_VALUE
   load_env_default "$env_file" "GPT_IMAGE_WEBUI_CLEANUP_LOG_FILE" GPT_IMAGE_WEBUI_CLEANUP_LOG_FILE_VALUE
 
+  load_env_default "$env_file" "GEMINI_IMAGE_DESK_IMAGE" GEMINI_IMAGE_DESK_IMAGE_VALUE
+  load_env_default "$env_file" "GEMINI_IMAGE_DESK_PUBLISH_HOST_PORT" GEMINI_IMAGE_DESK_PUBLISH_HOST_PORT_VALUE
+  load_env_default "$env_file" "GEMINI_IMAGE_DESK_HOST_PORT" GEMINI_IMAGE_DESK_HOST_PORT_VALUE
+  load_env_default "$env_file" "GEMINI_IMAGE_DESK_BASE_URL" GEMINI_IMAGE_DESK_BASE_URL_VALUE
+  load_env_default "$env_file" "GEMINI_IMAGE_DESK_DEFAULT_MODEL" GEMINI_IMAGE_DESK_DEFAULT_MODEL_VALUE
+  load_env_default "$env_file" "GEMINI_IMAGE_DESK_PUBLIC_BASE_URL_CONFIG" GEMINI_IMAGE_DESK_PUBLIC_BASE_URL_CONFIG_VALUE
+
   load_env_default "$env_file" "NGINX_IMAGE" NGINX_IMAGE_VALUE
   load_env_default "$env_file" "NGINX_DEPLOY_MODE" NGINX_DEPLOY_MODE_VALUE
   load_env_default "$env_file" "NGINX_ENABLE_HTTPS" NGINX_ENABLE_HTTPS
@@ -665,11 +749,15 @@ load_existing_env_defaults() {
   load_env_default "$env_file" "NGINX_LAN_ADMIN_PORT" NGINX_LAN_ADMIN_PORT_VALUE
   load_env_default "$env_file" "NGINX_LAN_SUB2API_PORT" NGINX_LAN_SUB2API_PORT_VALUE
   load_env_default "$env_file" "NGINX_LAN_WEBUI_PORT" NGINX_LAN_WEBUI_PORT_VALUE
+  load_env_default "$env_file" "NGINX_LAN_NEWAPI_V2_PORT" NGINX_LAN_NEWAPI_V2_PORT_VALUE
+  load_env_default "$env_file" "NGINX_LAN_GEMINI_IMAGE_DESK_PORT" NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE
   load_env_default "$env_file" "NGINX_HTTP_SERVER_NAMES" NGINX_HTTP_SERVER_NAMES_VALUE
   load_env_default "$env_file" "NGINX_API_SERVER_NAMES" NGINX_API_SERVER_NAMES_VALUE
   load_env_default "$env_file" "NGINX_ADMIN_SERVER_NAME" NGINX_ADMIN_SERVER_NAME_VALUE
   load_env_default "$env_file" "NGINX_SUB2API_SERVER_NAMES" NGINX_SUB2API_SERVER_NAMES_VALUE
   load_env_default "$env_file" "NGINX_WEBUI_SERVER_NAMES" NGINX_WEBUI_SERVER_NAMES_VALUE
+  load_env_default "$env_file" "NGINX_NEWAPI_V2_SERVER_NAMES" NGINX_NEWAPI_V2_SERVER_NAMES_VALUE
+  load_env_default "$env_file" "NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES" NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE
   load_env_default "$env_file" "NGINX_API_CERT" NGINX_API_CERT_VALUE
   load_env_default "$env_file" "NGINX_API_KEY" NGINX_API_KEY_VALUE
   load_env_default "$env_file" "NGINX_ADMIN_CERT" NGINX_ADMIN_CERT_VALUE
@@ -678,10 +766,16 @@ load_existing_env_defaults() {
   load_env_default "$env_file" "NGINX_SUB2API_KEY" NGINX_SUB2API_KEY_VALUE
   load_env_default "$env_file" "NGINX_WEBUI_CERT" NGINX_WEBUI_CERT_VALUE
   load_env_default "$env_file" "NGINX_WEBUI_KEY" NGINX_WEBUI_KEY_VALUE
+  load_env_default "$env_file" "NGINX_NEWAPI_V2_CERT" NGINX_NEWAPI_V2_CERT_VALUE
+  load_env_default "$env_file" "NGINX_NEWAPI_V2_KEY" NGINX_NEWAPI_V2_KEY_VALUE
+  load_env_default "$env_file" "NGINX_GEMINI_IMAGE_DESK_CERT" NGINX_GEMINI_IMAGE_DESK_CERT_VALUE
+  load_env_default "$env_file" "NGINX_GEMINI_IMAGE_DESK_KEY" NGINX_GEMINI_IMAGE_DESK_KEY_VALUE
   load_env_default "$env_file" "NGINX_NEWAPI_UPSTREAM" NGINX_NEWAPI_UPSTREAM_VALUE
   load_env_default "$env_file" "NGINX_CLIPROXY_UPSTREAM" NGINX_CLIPROXY_UPSTREAM_VALUE
   load_env_default "$env_file" "NGINX_SUB2API_UPSTREAM" NGINX_SUB2API_UPSTREAM_VALUE
   load_env_default "$env_file" "NGINX_GPT_IMAGE_WEBUI_UPSTREAM" NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE
+  load_env_default "$env_file" "NGINX_NEWAPI_V2_UPSTREAM" NGINX_NEWAPI_V2_UPSTREAM_VALUE
+  load_env_default "$env_file" "NGINX_GEMINI_IMAGE_DESK_UPSTREAM" NGINX_GEMINI_IMAGE_DESK_UPSTREAM_VALUE
 }
 
 first_word() {
@@ -749,6 +843,12 @@ service_from_token() {
     postgres|postgresql|pg|db|redis|cache)
       printf 'new-api'
       ;;
+    5|newapi-v2|new-api-v2|newapi2|new-api2|newapi-new|new-newapi|tannic-newapi)
+      printf 'newapi-v2'
+      ;;
+    newapi-v2-postgres|newapi-v2-pg|newapi-v2-db|newapi-v2-redis|newapi-v2-cache)
+      printf 'newapi-v2'
+      ;;
     2|cliproxy|cliproxyapi|cli-proxy-api|cli|cpa)
       printf 'cli-proxy-api'
       ;;
@@ -757,6 +857,9 @@ service_from_token() {
       ;;
     4|gpt-image-2-webui|gpt-image-webui|gptimage|gpt-image|image-webui|webui|image|image2)
       printf 'gpt-image-2-webui'
+      ;;
+    6|gemini-image-desk|gemini-desk|gemini-image|gemini|image-desk)
+      printf 'gemini-image-desk'
       ;;
     *)
       return 1
@@ -783,9 +886,11 @@ select_services() {
   menu_option "$COLOR_GREEN" " 2)" "cli-proxy-api"
   menu_option "$COLOR_GREEN" " 3)" "sub2api"
   menu_option "$COLOR_GREEN" " 4)" "gpt-image-2-webui"
+  menu_option "$COLOR_GREEN" " 5)" "newapi-v2（tannic666/newapi，新版）"
+  menu_option "$COLOR_GREEN" " 6)" "gemini-image-desk"
   subtle_note "Nginx 默认作为统一网关必装，会按所选应用自动生成入口。"
-  subtle_note "new-api 和 sub2api 的 PostgreSQL / Redis 依赖会自动处理，不单独选择。"
-  subtle_note "输入 all、1234、1 2、1,2 或服务名都可以。"
+  subtle_note "new-api、新版 NewAPI 和 sub2api 的 PostgreSQL / Redis 依赖会自动处理，不单独选择。"
+  subtle_note "输入 all、123456、1 2、1,5 或服务名都可以。"
 
   while true; do
     read_line raw "要部署的服务" "all"
@@ -805,7 +910,7 @@ select_services() {
     saw_nginx_default="false"
 
     for token in $raw; do
-      if [[ "$token" =~ ^[1234]+$ && "${#token}" -gt 1 ]]; then
+      if [[ "$token" =~ ^[1-6]+$ && "${#token}" -gt 1 ]]; then
         local index=0
         local char=""
         for ((index = 0; index < ${#token}; index++)); do
@@ -855,6 +960,11 @@ needs_postgres_config() {
   return 1
 }
 
+needs_newapi_v2_config() {
+  selected_or_all "newapi-v2" && return 0
+  return 1
+}
+
 needs_cliproxy_config() {
   selected_or_all "cli-proxy-api" && return 0
   return 1
@@ -867,6 +977,11 @@ needs_sub2api_config() {
 
 needs_gpt_image_webui_config() {
   selected_or_all "gpt-image-2-webui" && return 0
+  return 1
+}
+
+needs_gemini_image_desk_config() {
+  selected_or_all "gemini-image-desk" && return 0
   return 1
 }
 
@@ -885,6 +1000,8 @@ nginx_selected_service_names() {
   needs_cliproxy_config && names+=("CPA")
   needs_sub2api_config && names+=("Sub2API")
   needs_gpt_image_webui_config && names+=("GPT Image WebUI")
+  needs_newapi_v2_config && names+=("新版 NewAPI")
+  needs_gemini_image_desk_config && names+=("Gemini Image Desk")
 
   join_list "${names[@]}"
 }
@@ -896,6 +1013,8 @@ build_nginx_http_server_names() {
   needs_cliproxy_config && names+=("$NGINX_ADMIN_SERVER_NAME_VALUE")
   needs_sub2api_config && names+=("$NGINX_SUB2API_SERVER_NAMES_VALUE")
   needs_gpt_image_webui_config && names+=("$NGINX_WEBUI_SERVER_NAMES_VALUE")
+  needs_newapi_v2_config && names+=("$NGINX_NEWAPI_V2_SERVER_NAMES_VALUE")
+  needs_gemini_image_desk_config && names+=("$NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE")
 
   printf '%s' "${names[*]}"
 }
@@ -970,6 +1089,10 @@ read_nginx_certificate_files() {
       NGINX_SUB2API_KEY_VALUE="$last_key"
       NGINX_WEBUI_CERT_VALUE="$last_cert"
       NGINX_WEBUI_KEY_VALUE="$last_key"
+      NGINX_NEWAPI_V2_CERT_VALUE="$last_cert"
+      NGINX_NEWAPI_V2_KEY_VALUE="$last_key"
+      NGINX_GEMINI_IMAGE_DESK_CERT_VALUE="$last_cert"
+      NGINX_GEMINI_IMAGE_DESK_KEY_VALUE="$last_key"
       printf '已设置：所有 Nginx HTTPS 站点共用证书 %s / %s。\n' "$last_cert" "$last_key"
       return
     fi
@@ -987,6 +1110,10 @@ read_nginx_certificate_files() {
     NGINX_SUB2API_KEY_VALUE="$NGINX_API_KEY_VALUE"
     NGINX_WEBUI_CERT_VALUE="$NGINX_API_CERT_VALUE"
     NGINX_WEBUI_KEY_VALUE="$NGINX_API_KEY_VALUE"
+    NGINX_NEWAPI_V2_CERT_VALUE="$NGINX_API_CERT_VALUE"
+    NGINX_NEWAPI_V2_KEY_VALUE="$NGINX_API_KEY_VALUE"
+    NGINX_GEMINI_IMAGE_DESK_CERT_VALUE="$NGINX_API_CERT_VALUE"
+    NGINX_GEMINI_IMAGE_DESK_KEY_VALUE="$NGINX_API_KEY_VALUE"
     printf '已设置：%s 共用证书 %s / %s。\n' "$(nginx_selected_service_names)" "$NGINX_API_CERT_VALUE" "$NGINX_API_KEY_VALUE"
     return
   fi
@@ -1007,6 +1134,14 @@ read_nginx_certificate_files() {
     read_line NGINX_WEBUI_CERT_VALUE "nginx/certs 里的 GPT Image WebUI 证书文件名" "$NGINX_WEBUI_CERT_VALUE"
     read_line NGINX_WEBUI_KEY_VALUE "nginx/certs 里的 GPT Image WebUI 私钥文件名" "$NGINX_WEBUI_KEY_VALUE"
   fi
+  if needs_newapi_v2_config; then
+    read_line NGINX_NEWAPI_V2_CERT_VALUE "nginx/certs 里的新版 NewAPI 证书文件名" "$NGINX_NEWAPI_V2_CERT_VALUE"
+    read_line NGINX_NEWAPI_V2_KEY_VALUE "nginx/certs 里的新版 NewAPI 私钥文件名" "$NGINX_NEWAPI_V2_KEY_VALUE"
+  fi
+  if needs_gemini_image_desk_config; then
+    read_line NGINX_GEMINI_IMAGE_DESK_CERT_VALUE "nginx/certs 里的 Gemini Image Desk 证书文件名" "$NGINX_GEMINI_IMAGE_DESK_CERT_VALUE"
+    read_line NGINX_GEMINI_IMAGE_DESK_KEY_VALUE "nginx/certs 里的 Gemini Image Desk 私钥文件名" "$NGINX_GEMINI_IMAGE_DESK_KEY_VALUE"
+  fi
 }
 
 uses_nginx_frontend() {
@@ -1016,6 +1151,8 @@ uses_nginx_frontend() {
 default_gpt_image_webui_base_url() {
   if needs_newapi_config; then
     printf 'http://new-api:3000/v1'
+  elif needs_newapi_v2_config; then
+    printf 'http://newapi-v2:3000/v1'
   fi
 }
 
@@ -1337,6 +1474,9 @@ service_from_compose_token() {
     1|new-api|newapi|api)
       printf 'new-api'
       ;;
+    5|newapi-v2|new-api-v2|newapi2|new-api2|newapi-new|new-newapi|tannic-newapi)
+      printf 'newapi-v2'
+      ;;
     2|cli-proxy-api|cliproxy-api|cliproxy|cpa|admin)
       printf 'cli-proxy-api'
       ;;
@@ -1345,6 +1485,15 @@ service_from_compose_token() {
       ;;
     4|gpt-image-2-webui|gpt-image-webui|gptimage|gpt-image|image-webui|webui|image|image2)
       printf 'gpt-image-2-webui'
+      ;;
+    6|gemini-image-desk|gemini-desk|gemini-image|gemini|image-desk)
+      printf 'gemini-image-desk'
+      ;;
+    newapi-v2-postgres|newapi-v2-pg|newapi-v2-db)
+      printf 'newapi-v2-postgres'
+      ;;
+    newapi-v2-redis|newapi-v2-cache)
+      printf 'newapi-v2-redis'
       ;;
     sub2api-postgres|sub2api-pg|sub2api-db)
       printf 'sub2api-postgres'
@@ -1378,7 +1527,7 @@ select_compose_targets() {
   local service=""
 
   COMPOSE_TARGETS=()
-  subtle_note "输入 all 表示全部；也可以输入 1234、1 2、1,2、nginx、sub2api、webui、postgres、redis。"
+  subtle_note "输入 all 表示全部；也可以输入 123456、1 2、1,5、nginx、sub2api、webui、newapi-v2、gemini。"
 
   while true; do
     read_line raw "请选择要操作的服务" "all"
@@ -1394,7 +1543,7 @@ select_compose_targets() {
 
     COMPOSE_TARGETS=()
     for token in $raw; do
-      if [[ "$token" =~ ^[1234]+$ && "${#token}" -gt 1 ]]; then
+      if [[ "$token" =~ ^[1-6]+$ && "${#token}" -gt 1 ]]; then
         local index=0
         local char=""
         for ((index = 0; index < ${#token}; index++)); do
@@ -1425,6 +1574,10 @@ collect_answers() {
   NEWAPI_SESSION_SECRET_VALUE="$(random_hex 32)"
   NEWAPI_CRYPTO_SECRET_VALUE="$(random_hex 32)"
   POSTGRES_PASSWORD_VALUE="$(random_hex 16)"
+  NEWAPI_V2_SESSION_SECRET_VALUE="$(random_hex 32)"
+  NEWAPI_V2_CRYPTO_SECRET_VALUE="$(random_hex 32)"
+  NEWAPI_V2_POSTGRES_PASSWORD_VALUE="$(random_hex 16)"
+  NEWAPI_V2_REDIS_PASSWORD_VALUE="$(random_hex 16)"
   CLIPROXY_REMOTE_SECRET_VALUE="$(random_hex 32)"
   CLIPROXY_API_KEY_VALUE="$(random_hex 32)"
   SUB2API_POSTGRES_PASSWORD_VALUE="$(random_hex 16)"
@@ -1505,6 +1658,57 @@ collect_answers() {
       read_line REDIS_IMAGE_VALUE "Redis 镜像" "$REDIS_IMAGE_VALUE"
     else
       REDIS_IMAGE_VALUE="redis:7-alpine"
+    fi
+  fi
+
+  if needs_newapi_v2_config; then
+    [[ -n "$NEWAPI_V2_SESSION_SECRET_VALUE" ]] || NEWAPI_V2_SESSION_SECRET_VALUE="$(random_hex 32)"
+    [[ -n "$NEWAPI_V2_CRYPTO_SECRET_VALUE" ]] || NEWAPI_V2_CRYPTO_SECRET_VALUE="$(random_hex 32)"
+    [[ -n "$NEWAPI_V2_POSTGRES_PASSWORD_VALUE" ]] || NEWAPI_V2_POSTGRES_PASSWORD_VALUE="$(random_hex 16)"
+    [[ -n "$NEWAPI_V2_REDIS_PASSWORD_VALUE" ]] || NEWAPI_V2_REDIS_PASSWORD_VALUE="$(random_hex 16)"
+
+    if [[ "$ADVANCED_CONFIG_VALUE" == "true" ]]; then
+      section_title "新版 NewAPI 配置"
+      read_line NEWAPI_V2_IMAGE_VALUE "新版 NewAPI 镜像" "$NEWAPI_V2_IMAGE_VALUE"
+      if uses_nginx_frontend; then
+        NEWAPI_V2_PUBLISH_HOST_PORT_VALUE=false
+        printf '默认启用 Nginx，新版 NewAPI 默认不映射宿主机端口，只允许 Nginx 通过 Docker 网络访问。\n'
+      else
+        read_yes_no NEWAPI_V2_PUBLISH_HOST_PORT_VALUE "是否开放新版 NewAPI 直连端口" "$NEWAPI_V2_PUBLISH_HOST_PORT_VALUE"
+      fi
+      if [[ "$NEWAPI_V2_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+        read_line NEWAPI_V2_HOST_PORT_VALUE "新版 NewAPI 主机端口" "$NEWAPI_V2_HOST_PORT_VALUE"
+      fi
+      read_line NEWAPI_V2_SESSION_SECRET_VALUE "新版 NewAPI 会话密钥（明文）" "$NEWAPI_V2_SESSION_SECRET_VALUE"
+      read_line NEWAPI_V2_CRYPTO_SECRET_VALUE "新版 NewAPI 加密密钥（明文）" "$NEWAPI_V2_CRYPTO_SECRET_VALUE"
+      read_line NEWAPI_V2_ERROR_LOG_ENABLED_VALUE "新版 NewAPI 是否开启错误日志" "$NEWAPI_V2_ERROR_LOG_ENABLED_VALUE"
+      read_line NEWAPI_V2_BATCH_UPDATE_ENABLED_VALUE "新版 NewAPI 是否开启批量更新" "$NEWAPI_V2_BATCH_UPDATE_ENABLED_VALUE"
+      read_line NEWAPI_V2_MAX_REQUEST_BODY_MB_VALUE "新版 NewAPI 最大请求体 MB" "$NEWAPI_V2_MAX_REQUEST_BODY_MB_VALUE"
+      read_line NEWAPI_V2_MAX_FILE_DOWNLOAD_MB_VALUE "新版 NewAPI 最大下载文件 MB" "$NEWAPI_V2_MAX_FILE_DOWNLOAD_MB_VALUE"
+      read_line NEWAPI_V2_NODE_NAME_VALUE "新版 NewAPI 节点名" "$NEWAPI_V2_NODE_NAME_VALUE"
+      read_line NEWAPI_V2_POSTGRES_IMAGE_VALUE "新版 NewAPI PostgreSQL 镜像" "$NEWAPI_V2_POSTGRES_IMAGE_VALUE"
+      read_line NEWAPI_V2_POSTGRES_USER_VALUE "新版 NewAPI PostgreSQL 用户名" "$NEWAPI_V2_POSTGRES_USER_VALUE"
+      read_line NEWAPI_V2_POSTGRES_PASSWORD_VALUE "新版 NewAPI PostgreSQL 密码（明文，建议不要包含 @:/?#）" "$NEWAPI_V2_POSTGRES_PASSWORD_VALUE"
+      read_line NEWAPI_V2_POSTGRES_DB_VALUE "新版 NewAPI PostgreSQL 数据库名" "$NEWAPI_V2_POSTGRES_DB_VALUE"
+      read_line NEWAPI_V2_REDIS_IMAGE_VALUE "新版 NewAPI Redis 镜像" "$NEWAPI_V2_REDIS_IMAGE_VALUE"
+      read_line NEWAPI_V2_REDIS_PASSWORD_VALUE "新版 NewAPI Redis 密码（明文）" "$NEWAPI_V2_REDIS_PASSWORD_VALUE"
+    else
+      NEWAPI_V2_IMAGE_VALUE="tannic666/newapi:latest"
+      NEWAPI_V2_ERROR_LOG_ENABLED_VALUE="true"
+      NEWAPI_V2_BATCH_UPDATE_ENABLED_VALUE="true"
+      NEWAPI_V2_MAX_REQUEST_BODY_MB_VALUE="10240"
+      NEWAPI_V2_MAX_FILE_DOWNLOAD_MB_VALUE="10240"
+      NEWAPI_V2_NODE_NAME_VALUE="newapi-v2-node-1"
+      NEWAPI_V2_POSTGRES_IMAGE_VALUE="postgres:15"
+      NEWAPI_V2_POSTGRES_USER_VALUE="newapi_v2"
+      NEWAPI_V2_POSTGRES_DB_VALUE="newapi_v2"
+      NEWAPI_V2_REDIS_IMAGE_VALUE="redis:7-alpine"
+      if uses_nginx_frontend; then
+        NEWAPI_V2_PUBLISH_HOST_PORT_VALUE=false
+        printf '默认启用 Nginx，新版 NewAPI 默认只通过 Docker 网络访问。\n'
+      else
+        NEWAPI_V2_PUBLISH_HOST_PORT_VALUE=true
+      fi
     fi
   fi
 
@@ -1643,6 +1847,36 @@ collect_answers() {
     fi
   fi
 
+  if needs_gemini_image_desk_config; then
+    if [[ "$ADVANCED_CONFIG_VALUE" == "true" ]]; then
+      section_title "Gemini Image Desk 配置"
+      read_line GEMINI_IMAGE_DESK_IMAGE_VALUE "Gemini Image Desk 镜像" "$GEMINI_IMAGE_DESK_IMAGE_VALUE"
+      read_line GEMINI_IMAGE_DESK_BASE_URL_VALUE "Gemini API Base URL" "$GEMINI_IMAGE_DESK_BASE_URL_VALUE"
+      read_line GEMINI_IMAGE_DESK_DEFAULT_MODEL_VALUE "默认 Gemini 图像模型" "$GEMINI_IMAGE_DESK_DEFAULT_MODEL_VALUE"
+      read_line GEMINI_IMAGE_DESK_PUBLIC_BASE_URL_CONFIG_VALUE "是否允许页面填写 Base URL" "$GEMINI_IMAGE_DESK_PUBLIC_BASE_URL_CONFIG_VALUE"
+      if uses_nginx_frontend; then
+        GEMINI_IMAGE_DESK_PUBLISH_HOST_PORT_VALUE=false
+        printf '默认启用 Nginx，Gemini Image Desk 默认不映射宿主机端口，只通过 Nginx 访问。\n'
+      else
+        read_yes_no GEMINI_IMAGE_DESK_PUBLISH_HOST_PORT_VALUE "是否开放 Gemini Image Desk 直连端口" "$GEMINI_IMAGE_DESK_PUBLISH_HOST_PORT_VALUE"
+      fi
+      if [[ "$GEMINI_IMAGE_DESK_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+        read_line GEMINI_IMAGE_DESK_HOST_PORT_VALUE "Gemini Image Desk 主机端口" "$GEMINI_IMAGE_DESK_HOST_PORT_VALUE"
+      fi
+    else
+      GEMINI_IMAGE_DESK_IMAGE_VALUE="tannic666/gemini-image-desk:latest"
+      GEMINI_IMAGE_DESK_BASE_URL_VALUE="https://generativelanguage.googleapis.com"
+      GEMINI_IMAGE_DESK_DEFAULT_MODEL_VALUE="gemini-2.5-flash-image"
+      GEMINI_IMAGE_DESK_PUBLIC_BASE_URL_CONFIG_VALUE="false"
+      if uses_nginx_frontend; then
+        GEMINI_IMAGE_DESK_PUBLISH_HOST_PORT_VALUE=false
+        printf '默认启用 Nginx，Gemini Image Desk 默认只通过 Nginx 访问。\n'
+      else
+        GEMINI_IMAGE_DESK_PUBLISH_HOST_PORT_VALUE=true
+      fi
+    fi
+  fi
+
   if needs_nginx_config; then
     section_title "Nginx 配置"
     if [[ "$ADVANCED_CONFIG_VALUE" == "true" ]]; then
@@ -1663,6 +1897,12 @@ collect_answers() {
         if needs_gpt_image_webui_config; then
           read_line NGINX_LAN_WEBUI_PORT_VALUE "局域网 GPT Image WebUI 入口主机端口" "$NGINX_LAN_WEBUI_PORT_VALUE"
         fi
+        if needs_newapi_v2_config; then
+          read_line NGINX_LAN_NEWAPI_V2_PORT_VALUE "局域网新版 NewAPI 入口主机端口" "$NGINX_LAN_NEWAPI_V2_PORT_VALUE"
+        fi
+        if needs_gemini_image_desk_config; then
+          read_line NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE "局域网 Gemini Image Desk 入口主机端口" "$NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE"
+        fi
       else
         read_yes_no https_enabled "是否启用 Nginx HTTPS 配置" "$NGINX_ENABLE_HTTPS"
         NGINX_ENABLE_HTTPS="$https_enabled"
@@ -1679,6 +1919,8 @@ collect_answers() {
         needs_cliproxy_config && read_line NGINX_ADMIN_SERVER_NAME_VALUE "CLIProxyAPI 绑定域名（多个空格分隔）" "$NGINX_ADMIN_SERVER_NAME_VALUE"
         needs_sub2api_config && read_line NGINX_SUB2API_SERVER_NAMES_VALUE "Sub2API 绑定域名（多个空格分隔）" "$NGINX_SUB2API_SERVER_NAMES_VALUE"
         needs_gpt_image_webui_config && read_line NGINX_WEBUI_SERVER_NAMES_VALUE "GPT Image WebUI 绑定域名（多个空格分隔）" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
+        needs_newapi_v2_config && read_line NGINX_NEWAPI_V2_SERVER_NAMES_VALUE "新版 NewAPI 绑定域名（多个空格分隔）" "$NGINX_NEWAPI_V2_SERVER_NAMES_VALUE"
+        needs_gemini_image_desk_config && read_line NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE "Gemini Image Desk 绑定域名（多个空格分隔）" "$NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE"
         NGINX_HTTP_SERVER_NAMES_VALUE="$(build_nginx_http_server_names)"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           read_nginx_certificate_files
@@ -1687,6 +1929,8 @@ collect_answers() {
         needs_cliproxy_config && read_line NGINX_CLIPROXY_UPSTREAM_VALUE "CLIProxyAPI 上游地址" "$NGINX_CLIPROXY_UPSTREAM_VALUE"
         needs_sub2api_config && read_line NGINX_SUB2API_UPSTREAM_VALUE "Sub2API 上游地址" "$NGINX_SUB2API_UPSTREAM_VALUE"
         needs_gpt_image_webui_config && read_line NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE "GPT Image WebUI 上游地址" "$NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE"
+        needs_newapi_v2_config && read_line NGINX_NEWAPI_V2_UPSTREAM_VALUE "新版 NewAPI 上游地址" "$NGINX_NEWAPI_V2_UPSTREAM_VALUE"
+        needs_gemini_image_desk_config && read_line NGINX_GEMINI_IMAGE_DESK_UPSTREAM_VALUE "Gemini Image Desk 上游地址" "$NGINX_GEMINI_IMAGE_DESK_UPSTREAM_VALUE"
         printf '已绑定所选 Nginx 站点：%s。\n' "$(nginx_selected_service_names)"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           if [[ "$NGINX_HTTP_TO_HTTPS_REDIRECT_VALUE" == "true" ]]; then
@@ -1716,6 +1960,8 @@ collect_answers() {
         needs_cliproxy_config && read_line NGINX_ADMIN_SERVER_NAME_VALUE "CLIProxyAPI 绑定域名（多个空格分隔）" "$NGINX_ADMIN_SERVER_NAME_VALUE"
         needs_sub2api_config && read_line NGINX_SUB2API_SERVER_NAMES_VALUE "Sub2API 绑定域名（多个空格分隔）" "$NGINX_SUB2API_SERVER_NAMES_VALUE"
         needs_gpt_image_webui_config && read_line NGINX_WEBUI_SERVER_NAMES_VALUE "GPT Image WebUI 绑定域名（多个空格分隔）" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
+        needs_newapi_v2_config && read_line NGINX_NEWAPI_V2_SERVER_NAMES_VALUE "新版 NewAPI 绑定域名（多个空格分隔）" "$NGINX_NEWAPI_V2_SERVER_NAMES_VALUE"
+        needs_gemini_image_desk_config && read_line NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE "Gemini Image Desk 绑定域名（多个空格分隔）" "$NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE"
         NGINX_HTTP_SERVER_NAMES_VALUE="$(build_nginx_http_server_names)"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           read_nginx_certificate_files
@@ -1725,6 +1971,8 @@ collect_answers() {
       NGINX_CLIPROXY_UPSTREAM_VALUE="cli-proxy-api:8317"
       NGINX_SUB2API_UPSTREAM_VALUE="sub2api:8080"
       NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE="gpt-image-2-webui:3000"
+      NGINX_NEWAPI_V2_UPSTREAM_VALUE="newapi-v2:3000"
+      NGINX_GEMINI_IMAGE_DESK_UPSTREAM_VALUE="gemini-image-desk:3000"
       if [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" ]]; then
         printf '已绑定所选 Nginx 站点：%s。\n' "$(nginx_selected_service_names)"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
@@ -1762,80 +2010,148 @@ yaml_quote() {
 
 prepare_directories() {
   mkdir -p "$STACK_DIR"
-  mkdir -p "$STACK_DIR/new-api/data"
-  mkdir -p "$STACK_DIR/new-api/logs"
-  mkdir -p "$STACK_DIR/cliproxyapi/auths"
-  mkdir -p "$STACK_DIR/cliproxyapi/logs"
-  mkdir -p "$STACK_DIR/sub2api/data"
-  mkdir -p "$STACK_DIR/gpt-image-2-webui/generated-images"
-  mkdir -p "$STACK_DIR/gpt-image-2-webui/logs"
   mkdir -p "$STACK_DIR/nginx/conf.d"
   mkdir -p "$STACK_DIR/nginx/certs"
-  chmod -R a+rwX "$STACK_DIR/gpt-image-2-webui/generated-images" "$STACK_DIR/gpt-image-2-webui/logs" 2>/dev/null || true
+
+  if needs_newapi_config; then
+    mkdir -p "$STACK_DIR/new-api/data"
+    mkdir -p "$STACK_DIR/new-api/logs"
+  fi
+
+  if needs_cliproxy_config; then
+    mkdir -p "$STACK_DIR/cliproxyapi/auths"
+    mkdir -p "$STACK_DIR/cliproxyapi/logs"
+  fi
+
+  if needs_newapi_v2_config; then
+    mkdir -p "$STACK_DIR/newapi-v2/data"
+    mkdir -p "$STACK_DIR/newapi-v2/logs"
+  fi
+
+  if needs_sub2api_config; then
+    mkdir -p "$STACK_DIR/sub2api/data"
+  fi
+
+  if needs_gpt_image_webui_config; then
+    mkdir -p "$STACK_DIR/gpt-image-2-webui/generated-images"
+    mkdir -p "$STACK_DIR/gpt-image-2-webui/logs"
+    chmod -R a+rwX "$STACK_DIR/gpt-image-2-webui/generated-images" "$STACK_DIR/gpt-image-2-webui/logs" 2>/dev/null || true
+  fi
+
+  if needs_gemini_image_desk_config; then
+    mkdir -p "$STACK_DIR/gemini-image-desk"
+  fi
 }
 
 write_env_file() {
   local env_file="$STACK_DIR/.env"
+  local nginx_http_server_names="$NGINX_HTTP_SERVER_NAMES_VALUE"
+
+  if [[ "$NGINX_DEPLOY_MODE_VALUE" == "lan" ]]; then
+    nginx_http_server_names="$(build_nginx_http_server_names)"
+  fi
 
   {
     write_env_line "COMPOSE_PROJECT_NAME" "$PROJECT_NAME_VALUE"
+    write_env_line "STACK_DIR" "$STACK_DIR"
     write_env_line "TZ" "$TZ_VALUE"
     write_env_line "APP_NET_NAME" "$APP_NET_NAME_VALUE"
-    write_env_line "NEWAPI_IMAGE" "$NEWAPI_IMAGE_VALUE"
-    write_env_line "NEWAPI_PUBLISH_HOST_PORT" "$NEWAPI_PUBLISH_HOST_PORT_VALUE"
-    write_env_line "NEWAPI_HOST_PORT" "$NEWAPI_HOST_PORT_VALUE"
-    write_env_line "NEWAPI_SESSION_SECRET" "$NEWAPI_SESSION_SECRET_VALUE"
-    write_env_line "NEWAPI_CRYPTO_SECRET" "$NEWAPI_CRYPTO_SECRET_VALUE"
-    write_env_line "NEWAPI_ERROR_LOG_ENABLED" "$NEWAPI_ERROR_LOG_ENABLED_VALUE"
-    write_env_line "NEWAPI_BATCH_UPDATE_ENABLED" "$NEWAPI_BATCH_UPDATE_ENABLED_VALUE"
-    write_env_line "NEWAPI_MAX_REQUEST_BODY_MB" "$NEWAPI_MAX_REQUEST_BODY_MB_VALUE"
-    write_env_line "NEWAPI_MAX_FILE_DOWNLOAD_MB" "$NEWAPI_MAX_FILE_DOWNLOAD_MB_VALUE"
-    write_env_line "POSTGRES_IMAGE" "$POSTGRES_IMAGE_VALUE"
-    write_env_line "POSTGRES_USER" "$POSTGRES_USER_VALUE"
-    write_env_line "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD_VALUE"
-    write_env_line "POSTGRES_DB" "$POSTGRES_DB_VALUE"
-    write_env_line "REDIS_IMAGE" "$REDIS_IMAGE_VALUE"
-    write_env_line "CLIPROXY_IMAGE" "$CLIPROXY_IMAGE_VALUE"
-    write_env_line "CLIPROXY_DEPLOY" "$CLIPROXY_DEPLOY_VALUE"
-    write_env_line "CLIPROXY_REMOTE_SECRET" "$CLIPROXY_REMOTE_SECRET_VALUE"
-    write_env_line "CLIPROXY_API_KEY" "$CLIPROXY_API_KEY_VALUE"
-    write_env_line "CLIPROXY_PUBLISH_HOST_PORTS" "$CLIPROXY_PUBLISH_HOST_PORTS_VALUE"
-    write_env_line "CLIPROXY_PORT_8317" "$CLIPROXY_PORT_8317_VALUE"
-    write_env_line "CLIPROXY_PORT_8085" "$CLIPROXY_PORT_8085_VALUE"
-    write_env_line "CLIPROXY_PORT_1455" "$CLIPROXY_PORT_1455_VALUE"
-    write_env_line "CLIPROXY_PORT_54545" "$CLIPROXY_PORT_54545_VALUE"
-    write_env_line "CLIPROXY_PORT_51121" "$CLIPROXY_PORT_51121_VALUE"
-    write_env_line "CLIPROXY_PORT_11451" "$CLIPROXY_PORT_11451_VALUE"
-    write_env_line "SUB2API_IMAGE" "$SUB2API_IMAGE_VALUE"
-    write_env_line "SUB2API_POSTGRES_IMAGE" "$SUB2API_POSTGRES_IMAGE_VALUE"
-    write_env_line "SUB2API_REDIS_IMAGE" "$SUB2API_REDIS_IMAGE_VALUE"
-    write_env_line "SUB2API_PUBLISH_HOST_PORT" "$SUB2API_PUBLISH_HOST_PORT_VALUE"
-    write_env_line "SUB2API_HOST_PORT" "$SUB2API_HOST_PORT_VALUE"
-    write_env_line "SUB2API_SERVER_MODE" "$SUB2API_SERVER_MODE_VALUE"
-    write_env_line "SUB2API_RUN_MODE" "$SUB2API_RUN_MODE_VALUE"
-    write_env_line "SUB2API_POSTGRES_USER" "$SUB2API_POSTGRES_USER_VALUE"
-    write_env_line "SUB2API_POSTGRES_PASSWORD" "$SUB2API_POSTGRES_PASSWORD_VALUE"
-    write_env_line "SUB2API_POSTGRES_DB" "$SUB2API_POSTGRES_DB_VALUE"
-    write_env_line "SUB2API_REDIS_PASSWORD" "$SUB2API_REDIS_PASSWORD_VALUE"
-    write_env_line "SUB2API_ADMIN_EMAIL" "$SUB2API_ADMIN_EMAIL_VALUE"
-    write_env_line "SUB2API_ADMIN_PASSWORD" "$SUB2API_ADMIN_PASSWORD_VALUE"
-    write_env_line "SUB2API_JWT_SECRET" "$SUB2API_JWT_SECRET_VALUE"
-    write_env_line "SUB2API_TOTP_ENCRYPTION_KEY" "$SUB2API_TOTP_ENCRYPTION_KEY_VALUE"
-    write_env_line "SUB2API_UPDATE_PROXY_URL" "$SUB2API_UPDATE_PROXY_URL_VALUE"
-    write_env_line "GPT_IMAGE_WEBUI_IMAGE" "$GPT_IMAGE_WEBUI_IMAGE_VALUE"
-    write_env_line "GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT" "$GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE"
-    write_env_line "GPT_IMAGE_WEBUI_HOST_PORT" "$GPT_IMAGE_WEBUI_HOST_PORT_VALUE"
-    write_env_line "GPT_IMAGE_WEBUI_OPENAI_API_KEY" "$GPT_IMAGE_WEBUI_OPENAI_API_KEY_VALUE"
-    write_env_line "GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL" "$GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL_VALUE"
-    write_env_line "GPT_IMAGE_WEBUI_OPENAI_IMAGE_TIMEOUT_MS" "$GPT_IMAGE_WEBUI_OPENAI_IMAGE_TIMEOUT_MS_VALUE"
-    write_env_line "GPT_IMAGE_WEBUI_STORAGE_MODE" "$GPT_IMAGE_WEBUI_STORAGE_MODE_VALUE"
-    write_env_line "GPT_IMAGE_WEBUI_APP_PASSWORD" "$GPT_IMAGE_WEBUI_APP_PASSWORD_VALUE"
-    write_env_line "GPT_IMAGE_WEBUI_CLEANUP_ENABLED" "$GPT_IMAGE_WEBUI_CLEANUP_ENABLED_VALUE"
-    write_env_line "GPT_IMAGE_WEBUI_RETENTION_DAYS" "$GPT_IMAGE_WEBUI_RETENTION_DAYS_VALUE"
-    write_env_line "GPT_IMAGE_WEBUI_CLEANUP_INTERVAL_HOURS" "$GPT_IMAGE_WEBUI_CLEANUP_INTERVAL_HOURS_VALUE"
-    write_env_line "GPT_IMAGE_WEBUI_CLEANUP_RUN_ON_START" "$GPT_IMAGE_WEBUI_CLEANUP_RUN_ON_START_VALUE"
-    write_env_line "GPT_IMAGE_WEBUI_CLEANUP_DRY_RUN" "$GPT_IMAGE_WEBUI_CLEANUP_DRY_RUN_VALUE"
-    write_env_line "GPT_IMAGE_WEBUI_CLEANUP_LOG_FILE" "$GPT_IMAGE_WEBUI_CLEANUP_LOG_FILE_VALUE"
+
+    if needs_newapi_config; then
+      write_env_line "NEWAPI_IMAGE" "$NEWAPI_IMAGE_VALUE"
+      write_env_line "NEWAPI_PUBLISH_HOST_PORT" "$NEWAPI_PUBLISH_HOST_PORT_VALUE"
+      write_env_line "NEWAPI_HOST_PORT" "$NEWAPI_HOST_PORT_VALUE"
+      write_env_line "NEWAPI_SESSION_SECRET" "$NEWAPI_SESSION_SECRET_VALUE"
+      write_env_line "NEWAPI_CRYPTO_SECRET" "$NEWAPI_CRYPTO_SECRET_VALUE"
+      write_env_line "NEWAPI_ERROR_LOG_ENABLED" "$NEWAPI_ERROR_LOG_ENABLED_VALUE"
+      write_env_line "NEWAPI_BATCH_UPDATE_ENABLED" "$NEWAPI_BATCH_UPDATE_ENABLED_VALUE"
+      write_env_line "NEWAPI_MAX_REQUEST_BODY_MB" "$NEWAPI_MAX_REQUEST_BODY_MB_VALUE"
+      write_env_line "NEWAPI_MAX_FILE_DOWNLOAD_MB" "$NEWAPI_MAX_FILE_DOWNLOAD_MB_VALUE"
+      write_env_line "POSTGRES_IMAGE" "$POSTGRES_IMAGE_VALUE"
+      write_env_line "POSTGRES_USER" "$POSTGRES_USER_VALUE"
+      write_env_line "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD_VALUE"
+      write_env_line "POSTGRES_DB" "$POSTGRES_DB_VALUE"
+      write_env_line "REDIS_IMAGE" "$REDIS_IMAGE_VALUE"
+    fi
+
+    if needs_newapi_v2_config; then
+      write_env_line "NEWAPI_V2_IMAGE" "$NEWAPI_V2_IMAGE_VALUE"
+      write_env_line "NEWAPI_V2_PUBLISH_HOST_PORT" "$NEWAPI_V2_PUBLISH_HOST_PORT_VALUE"
+      write_env_line "NEWAPI_V2_HOST_PORT" "$NEWAPI_V2_HOST_PORT_VALUE"
+      write_env_line "NEWAPI_V2_SESSION_SECRET" "$NEWAPI_V2_SESSION_SECRET_VALUE"
+      write_env_line "NEWAPI_V2_CRYPTO_SECRET" "$NEWAPI_V2_CRYPTO_SECRET_VALUE"
+      write_env_line "NEWAPI_V2_ERROR_LOG_ENABLED" "$NEWAPI_V2_ERROR_LOG_ENABLED_VALUE"
+      write_env_line "NEWAPI_V2_BATCH_UPDATE_ENABLED" "$NEWAPI_V2_BATCH_UPDATE_ENABLED_VALUE"
+      write_env_line "NEWAPI_V2_MAX_REQUEST_BODY_MB" "$NEWAPI_V2_MAX_REQUEST_BODY_MB_VALUE"
+      write_env_line "NEWAPI_V2_MAX_FILE_DOWNLOAD_MB" "$NEWAPI_V2_MAX_FILE_DOWNLOAD_MB_VALUE"
+      write_env_line "NEWAPI_V2_NODE_NAME" "$NEWAPI_V2_NODE_NAME_VALUE"
+      write_env_line "NEWAPI_V2_POSTGRES_IMAGE" "$NEWAPI_V2_POSTGRES_IMAGE_VALUE"
+      write_env_line "NEWAPI_V2_POSTGRES_USER" "$NEWAPI_V2_POSTGRES_USER_VALUE"
+      write_env_line "NEWAPI_V2_POSTGRES_PASSWORD" "$NEWAPI_V2_POSTGRES_PASSWORD_VALUE"
+      write_env_line "NEWAPI_V2_POSTGRES_DB" "$NEWAPI_V2_POSTGRES_DB_VALUE"
+      write_env_line "NEWAPI_V2_REDIS_IMAGE" "$NEWAPI_V2_REDIS_IMAGE_VALUE"
+      write_env_line "NEWAPI_V2_REDIS_PASSWORD" "$NEWAPI_V2_REDIS_PASSWORD_VALUE"
+    fi
+
+    if needs_cliproxy_config; then
+      write_env_line "CLIPROXY_IMAGE" "$CLIPROXY_IMAGE_VALUE"
+      write_env_line "CLIPROXY_DEPLOY" "$CLIPROXY_DEPLOY_VALUE"
+      write_env_line "CLIPROXY_REMOTE_SECRET" "$CLIPROXY_REMOTE_SECRET_VALUE"
+      write_env_line "CLIPROXY_API_KEY" "$CLIPROXY_API_KEY_VALUE"
+      write_env_line "CLIPROXY_PUBLISH_HOST_PORTS" "$CLIPROXY_PUBLISH_HOST_PORTS_VALUE"
+      write_env_line "CLIPROXY_PORT_8317" "$CLIPROXY_PORT_8317_VALUE"
+      write_env_line "CLIPROXY_PORT_8085" "$CLIPROXY_PORT_8085_VALUE"
+      write_env_line "CLIPROXY_PORT_1455" "$CLIPROXY_PORT_1455_VALUE"
+      write_env_line "CLIPROXY_PORT_54545" "$CLIPROXY_PORT_54545_VALUE"
+      write_env_line "CLIPROXY_PORT_51121" "$CLIPROXY_PORT_51121_VALUE"
+      write_env_line "CLIPROXY_PORT_11451" "$CLIPROXY_PORT_11451_VALUE"
+    fi
+
+    if needs_sub2api_config; then
+      write_env_line "SUB2API_IMAGE" "$SUB2API_IMAGE_VALUE"
+      write_env_line "SUB2API_POSTGRES_IMAGE" "$SUB2API_POSTGRES_IMAGE_VALUE"
+      write_env_line "SUB2API_REDIS_IMAGE" "$SUB2API_REDIS_IMAGE_VALUE"
+      write_env_line "SUB2API_PUBLISH_HOST_PORT" "$SUB2API_PUBLISH_HOST_PORT_VALUE"
+      write_env_line "SUB2API_HOST_PORT" "$SUB2API_HOST_PORT_VALUE"
+      write_env_line "SUB2API_SERVER_MODE" "$SUB2API_SERVER_MODE_VALUE"
+      write_env_line "SUB2API_RUN_MODE" "$SUB2API_RUN_MODE_VALUE"
+      write_env_line "SUB2API_POSTGRES_USER" "$SUB2API_POSTGRES_USER_VALUE"
+      write_env_line "SUB2API_POSTGRES_PASSWORD" "$SUB2API_POSTGRES_PASSWORD_VALUE"
+      write_env_line "SUB2API_POSTGRES_DB" "$SUB2API_POSTGRES_DB_VALUE"
+      write_env_line "SUB2API_REDIS_PASSWORD" "$SUB2API_REDIS_PASSWORD_VALUE"
+      write_env_line "SUB2API_ADMIN_EMAIL" "$SUB2API_ADMIN_EMAIL_VALUE"
+      write_env_line "SUB2API_ADMIN_PASSWORD" "$SUB2API_ADMIN_PASSWORD_VALUE"
+      write_env_line "SUB2API_JWT_SECRET" "$SUB2API_JWT_SECRET_VALUE"
+      write_env_line "SUB2API_TOTP_ENCRYPTION_KEY" "$SUB2API_TOTP_ENCRYPTION_KEY_VALUE"
+      write_env_line "SUB2API_UPDATE_PROXY_URL" "$SUB2API_UPDATE_PROXY_URL_VALUE"
+    fi
+
+    if needs_gpt_image_webui_config; then
+      write_env_line "GPT_IMAGE_WEBUI_IMAGE" "$GPT_IMAGE_WEBUI_IMAGE_VALUE"
+      write_env_line "GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT" "$GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE"
+      write_env_line "GPT_IMAGE_WEBUI_HOST_PORT" "$GPT_IMAGE_WEBUI_HOST_PORT_VALUE"
+      write_env_line "GPT_IMAGE_WEBUI_OPENAI_API_KEY" "$GPT_IMAGE_WEBUI_OPENAI_API_KEY_VALUE"
+      write_env_line "GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL" "$GPT_IMAGE_WEBUI_OPENAI_API_BASE_URL_VALUE"
+      write_env_line "GPT_IMAGE_WEBUI_OPENAI_IMAGE_TIMEOUT_MS" "$GPT_IMAGE_WEBUI_OPENAI_IMAGE_TIMEOUT_MS_VALUE"
+      write_env_line "GPT_IMAGE_WEBUI_STORAGE_MODE" "$GPT_IMAGE_WEBUI_STORAGE_MODE_VALUE"
+      write_env_line "GPT_IMAGE_WEBUI_APP_PASSWORD" "$GPT_IMAGE_WEBUI_APP_PASSWORD_VALUE"
+      write_env_line "GPT_IMAGE_WEBUI_CLEANUP_ENABLED" "$GPT_IMAGE_WEBUI_CLEANUP_ENABLED_VALUE"
+      write_env_line "GPT_IMAGE_WEBUI_RETENTION_DAYS" "$GPT_IMAGE_WEBUI_RETENTION_DAYS_VALUE"
+      write_env_line "GPT_IMAGE_WEBUI_CLEANUP_INTERVAL_HOURS" "$GPT_IMAGE_WEBUI_CLEANUP_INTERVAL_HOURS_VALUE"
+      write_env_line "GPT_IMAGE_WEBUI_CLEANUP_RUN_ON_START" "$GPT_IMAGE_WEBUI_CLEANUP_RUN_ON_START_VALUE"
+      write_env_line "GPT_IMAGE_WEBUI_CLEANUP_DRY_RUN" "$GPT_IMAGE_WEBUI_CLEANUP_DRY_RUN_VALUE"
+      write_env_line "GPT_IMAGE_WEBUI_CLEANUP_LOG_FILE" "$GPT_IMAGE_WEBUI_CLEANUP_LOG_FILE_VALUE"
+    fi
+
+    if needs_gemini_image_desk_config; then
+      write_env_line "GEMINI_IMAGE_DESK_IMAGE" "$GEMINI_IMAGE_DESK_IMAGE_VALUE"
+      write_env_line "GEMINI_IMAGE_DESK_PUBLISH_HOST_PORT" "$GEMINI_IMAGE_DESK_PUBLISH_HOST_PORT_VALUE"
+      write_env_line "GEMINI_IMAGE_DESK_HOST_PORT" "$GEMINI_IMAGE_DESK_HOST_PORT_VALUE"
+      write_env_line "GEMINI_IMAGE_DESK_BASE_URL" "$GEMINI_IMAGE_DESK_BASE_URL_VALUE"
+      write_env_line "GEMINI_IMAGE_DESK_DEFAULT_MODEL" "$GEMINI_IMAGE_DESK_DEFAULT_MODEL_VALUE"
+      write_env_line "GEMINI_IMAGE_DESK_PUBLIC_BASE_URL_CONFIG" "$GEMINI_IMAGE_DESK_PUBLIC_BASE_URL_CONFIG_VALUE"
+    fi
+
     write_env_line "NGINX_IMAGE" "$NGINX_IMAGE_VALUE"
     write_env_line "NGINX_DEPLOY_MODE" "$NGINX_DEPLOY_MODE_VALUE"
     write_env_line "NGINX_ENABLE_HTTPS" "$NGINX_ENABLE_HTTPS"
@@ -1843,27 +2159,55 @@ write_env_file() {
     write_env_line "NGINX_HTTP_TO_HTTPS_REDIRECT" "$NGINX_HTTP_TO_HTTPS_REDIRECT_VALUE"
     write_env_line "NGINX_HTTP_PORT" "$NGINX_HTTP_PORT_VALUE"
     write_env_line "NGINX_HTTPS_PORT" "$NGINX_HTTPS_PORT_VALUE"
-    write_env_line "NGINX_LAN_API_PORT" "$NGINX_LAN_API_PORT_VALUE"
-    write_env_line "NGINX_LAN_ADMIN_PORT" "$NGINX_LAN_ADMIN_PORT_VALUE"
-    write_env_line "NGINX_LAN_SUB2API_PORT" "$NGINX_LAN_SUB2API_PORT_VALUE"
-    write_env_line "NGINX_LAN_WEBUI_PORT" "$NGINX_LAN_WEBUI_PORT_VALUE"
-    write_env_line "NGINX_HTTP_SERVER_NAMES" "$NGINX_HTTP_SERVER_NAMES_VALUE"
-    write_env_line "NGINX_API_SERVER_NAMES" "$NGINX_API_SERVER_NAMES_VALUE"
-    write_env_line "NGINX_ADMIN_SERVER_NAME" "$NGINX_ADMIN_SERVER_NAME_VALUE"
-    write_env_line "NGINX_SUB2API_SERVER_NAMES" "$NGINX_SUB2API_SERVER_NAMES_VALUE"
-    write_env_line "NGINX_WEBUI_SERVER_NAMES" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
-    write_env_line "NGINX_API_CERT" "$NGINX_API_CERT_VALUE"
-    write_env_line "NGINX_API_KEY" "$NGINX_API_KEY_VALUE"
-    write_env_line "NGINX_ADMIN_CERT" "$NGINX_ADMIN_CERT_VALUE"
-    write_env_line "NGINX_ADMIN_KEY" "$NGINX_ADMIN_KEY_VALUE"
-    write_env_line "NGINX_SUB2API_CERT" "$NGINX_SUB2API_CERT_VALUE"
-    write_env_line "NGINX_SUB2API_KEY" "$NGINX_SUB2API_KEY_VALUE"
-    write_env_line "NGINX_WEBUI_CERT" "$NGINX_WEBUI_CERT_VALUE"
-    write_env_line "NGINX_WEBUI_KEY" "$NGINX_WEBUI_KEY_VALUE"
-    write_env_line "NGINX_NEWAPI_UPSTREAM" "$NGINX_NEWAPI_UPSTREAM_VALUE"
-    write_env_line "NGINX_CLIPROXY_UPSTREAM" "$NGINX_CLIPROXY_UPSTREAM_VALUE"
-    write_env_line "NGINX_SUB2API_UPSTREAM" "$NGINX_SUB2API_UPSTREAM_VALUE"
-    write_env_line "NGINX_GPT_IMAGE_WEBUI_UPSTREAM" "$NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE"
+    write_env_line "NGINX_HTTP_SERVER_NAMES" "$nginx_http_server_names"
+
+    if needs_newapi_config; then
+      write_env_line "NGINX_LAN_API_PORT" "$NGINX_LAN_API_PORT_VALUE"
+      write_env_line "NGINX_API_SERVER_NAMES" "$NGINX_API_SERVER_NAMES_VALUE"
+      write_env_line "NGINX_API_CERT" "$NGINX_API_CERT_VALUE"
+      write_env_line "NGINX_API_KEY" "$NGINX_API_KEY_VALUE"
+      write_env_line "NGINX_NEWAPI_UPSTREAM" "$NGINX_NEWAPI_UPSTREAM_VALUE"
+    fi
+
+    if needs_cliproxy_config; then
+      write_env_line "NGINX_LAN_ADMIN_PORT" "$NGINX_LAN_ADMIN_PORT_VALUE"
+      write_env_line "NGINX_ADMIN_SERVER_NAME" "$NGINX_ADMIN_SERVER_NAME_VALUE"
+      write_env_line "NGINX_ADMIN_CERT" "$NGINX_ADMIN_CERT_VALUE"
+      write_env_line "NGINX_ADMIN_KEY" "$NGINX_ADMIN_KEY_VALUE"
+      write_env_line "NGINX_CLIPROXY_UPSTREAM" "$NGINX_CLIPROXY_UPSTREAM_VALUE"
+    fi
+
+    if needs_sub2api_config; then
+      write_env_line "NGINX_LAN_SUB2API_PORT" "$NGINX_LAN_SUB2API_PORT_VALUE"
+      write_env_line "NGINX_SUB2API_SERVER_NAMES" "$NGINX_SUB2API_SERVER_NAMES_VALUE"
+      write_env_line "NGINX_SUB2API_CERT" "$NGINX_SUB2API_CERT_VALUE"
+      write_env_line "NGINX_SUB2API_KEY" "$NGINX_SUB2API_KEY_VALUE"
+      write_env_line "NGINX_SUB2API_UPSTREAM" "$NGINX_SUB2API_UPSTREAM_VALUE"
+    fi
+
+    if needs_gpt_image_webui_config; then
+      write_env_line "NGINX_LAN_WEBUI_PORT" "$NGINX_LAN_WEBUI_PORT_VALUE"
+      write_env_line "NGINX_WEBUI_SERVER_NAMES" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
+      write_env_line "NGINX_WEBUI_CERT" "$NGINX_WEBUI_CERT_VALUE"
+      write_env_line "NGINX_WEBUI_KEY" "$NGINX_WEBUI_KEY_VALUE"
+      write_env_line "NGINX_GPT_IMAGE_WEBUI_UPSTREAM" "$NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE"
+    fi
+
+    if needs_newapi_v2_config; then
+      write_env_line "NGINX_LAN_NEWAPI_V2_PORT" "$NGINX_LAN_NEWAPI_V2_PORT_VALUE"
+      write_env_line "NGINX_NEWAPI_V2_SERVER_NAMES" "$NGINX_NEWAPI_V2_SERVER_NAMES_VALUE"
+      write_env_line "NGINX_NEWAPI_V2_CERT" "$NGINX_NEWAPI_V2_CERT_VALUE"
+      write_env_line "NGINX_NEWAPI_V2_KEY" "$NGINX_NEWAPI_V2_KEY_VALUE"
+      write_env_line "NGINX_NEWAPI_V2_UPSTREAM" "$NGINX_NEWAPI_V2_UPSTREAM_VALUE"
+    fi
+
+    if needs_gemini_image_desk_config; then
+      write_env_line "NGINX_LAN_GEMINI_IMAGE_DESK_PORT" "$NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE"
+      write_env_line "NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES" "$NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE"
+      write_env_line "NGINX_GEMINI_IMAGE_DESK_CERT" "$NGINX_GEMINI_IMAGE_DESK_CERT_VALUE"
+      write_env_line "NGINX_GEMINI_IMAGE_DESK_KEY" "$NGINX_GEMINI_IMAGE_DESK_KEY_VALUE"
+      write_env_line "NGINX_GEMINI_IMAGE_DESK_UPSTREAM" "$NGINX_GEMINI_IMAGE_DESK_UPSTREAM_VALUE"
+    fi
   } > "$env_file"
 }
 
@@ -2007,6 +2351,22 @@ append_selected_nginx_servers() {
       append_nginx_proxy_server "$file" "4. GPT Image WebUI${suffix}" "$listen_value" "$NGINX_WEBUI_SERVER_NAMES_VALUE" "$NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE" "$forwarded_proto" "" "" "600s"
     fi
   fi
+
+  if needs_newapi_v2_config; then
+    if [[ "$ssl_enabled" == "true" ]]; then
+      append_nginx_proxy_server "$file" "5. 新版 NewAPI${suffix}" "$listen_value" "$NGINX_NEWAPI_V2_SERVER_NAMES_VALUE" "$NGINX_NEWAPI_V2_UPSTREAM_VALUE" "$forwarded_proto" "$NGINX_NEWAPI_V2_CERT_VALUE" "$NGINX_NEWAPI_V2_KEY_VALUE" "300s"
+    else
+      append_nginx_proxy_server "$file" "5. 新版 NewAPI${suffix}" "$listen_value" "$NGINX_NEWAPI_V2_SERVER_NAMES_VALUE" "$NGINX_NEWAPI_V2_UPSTREAM_VALUE" "$forwarded_proto" "" "" "300s"
+    fi
+  fi
+
+  if needs_gemini_image_desk_config; then
+    if [[ "$ssl_enabled" == "true" ]]; then
+      append_nginx_proxy_server "$file" "6. Gemini Image Desk${suffix}" "$listen_value" "$NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE" "$NGINX_GEMINI_IMAGE_DESK_UPSTREAM_VALUE" "$forwarded_proto" "$NGINX_GEMINI_IMAGE_DESK_CERT_VALUE" "$NGINX_GEMINI_IMAGE_DESK_KEY_VALUE" "600s"
+    else
+      append_nginx_proxy_server "$file" "6. Gemini Image Desk${suffix}" "$listen_value" "$NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE" "$NGINX_GEMINI_IMAGE_DESK_UPSTREAM_VALUE" "$forwarded_proto" "" "" "600s"
+    fi
+  fi
 }
 
 write_nginx_conf() {
@@ -2019,7 +2379,9 @@ write_nginx_conf() {
     needs_cliproxy_config && append_nginx_proxy_server "$active_conf" "2. CPA / CLIProxyAPI" "8080 default_server" "_" "$NGINX_CLIPROXY_UPSTREAM_VALUE" "http" "" "" "600s" "600s"
     needs_sub2api_config && append_nginx_proxy_server "$active_conf" "3. Sub2API" "8081 default_server" "_" "$NGINX_SUB2API_UPSTREAM_VALUE" "http" "" "" "600s"
     needs_gpt_image_webui_config && append_nginx_proxy_server "$active_conf" "4. GPT Image WebUI" "8082 default_server" "_" "$NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE" "http" "" "" "600s"
-    return
+    needs_newapi_v2_config && append_nginx_proxy_server "$active_conf" "5. 新版 NewAPI" "8083 default_server" "_" "$NGINX_NEWAPI_V2_UPSTREAM_VALUE" "http" "" "" "300s"
+    needs_gemini_image_desk_config && append_nginx_proxy_server "$active_conf" "6. Gemini Image Desk" "8084 default_server" "_" "$NGINX_GEMINI_IMAGE_DESK_UPSTREAM_VALUE" "http" "" "" "600s"
+    return 0
   fi
 
   if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
@@ -2068,6 +2430,8 @@ validate_nginx_certificates() {
     needs_cliproxy_config && certs+=("$NGINX_ADMIN_CERT_VALUE" "$NGINX_ADMIN_KEY_VALUE")
     needs_sub2api_config && certs+=("$NGINX_SUB2API_CERT_VALUE" "$NGINX_SUB2API_KEY_VALUE")
     needs_gpt_image_webui_config && certs+=("$NGINX_WEBUI_CERT_VALUE" "$NGINX_WEBUI_KEY_VALUE")
+    needs_newapi_v2_config && certs+=("$NGINX_NEWAPI_V2_CERT_VALUE" "$NGINX_NEWAPI_V2_KEY_VALUE")
+    needs_gemini_image_desk_config && certs+=("$NGINX_GEMINI_IMAGE_DESK_CERT_VALUE" "$NGINX_GEMINI_IMAGE_DESK_KEY_VALUE")
   fi
 
   for file in "${certs[@]}"; do
@@ -2078,10 +2442,17 @@ validate_nginx_certificates() {
 }
 
 write_compose_file() {
-  local compose_file="$STACK_DIR/docker-compose.yml"
+  local compose_file="${1:-$STACK_DIR/docker-compose.yml}"
+  local include_nginx="${2:-true}"
+  local include_nginx_depends="${3:-true}"
+  local include_services="${4:-true}"
 
   cat > "$compose_file" <<'YAML'
 services:
+YAML
+
+  if [[ "$include_services" == "true" ]] && needs_newapi_config; then
+    cat >> "$compose_file" <<'YAML'
   new-api:
     image: "${NEWAPI_IMAGE:-calciumion/new-api:latest}"
     restart: unless-stopped
@@ -2097,8 +2468,8 @@ YAML
 
   cat >> "$compose_file" <<'YAML'
     volumes:
-      - ./new-api/data:/data
-      - ./new-api/logs:/app/logs
+      - ${STACK_DIR:-/opt/ai-api-stack}/new-api/data:/data
+      - ${STACK_DIR:-/opt/ai-api-stack}/new-api/logs:/app/logs
     environment:
       TZ: "${TZ:-Asia/Shanghai}"
       SQL_DSN: "postgresql://${POSTGRES_USER:-newapi}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-new-api}?sslmode=disable"
@@ -2161,6 +2532,96 @@ YAML
     networks:
       - stack-internal
 
+YAML
+  fi
+
+  if [[ "$include_services" == "true" ]] && needs_newapi_v2_config; then
+    cat >> "$compose_file" <<'YAML'
+  newapi-v2:
+    image: "${NEWAPI_V2_IMAGE:-tannic666/newapi:latest}"
+    restart: unless-stopped
+    command: --log-dir /app/logs
+YAML
+
+    if [[ "$NEWAPI_V2_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+      cat >> "$compose_file" <<'YAML'
+    ports:
+      - "${NEWAPI_V2_HOST_PORT:-3002}:3000"
+YAML
+    fi
+
+    cat >> "$compose_file" <<'YAML'
+    volumes:
+      - ${STACK_DIR:-/opt/ai-api-stack}/newapi-v2/data:/data
+      - ${STACK_DIR:-/opt/ai-api-stack}/newapi-v2/logs:/app/logs
+    environment:
+      TZ: "${TZ:-Asia/Shanghai}"
+      SQL_DSN: "postgresql://${NEWAPI_V2_POSTGRES_USER:-newapi_v2}:${NEWAPI_V2_POSTGRES_PASSWORD:-change-me}@newapi-v2-postgres:5432/${NEWAPI_V2_POSTGRES_DB:-newapi_v2}?sslmode=disable"
+      REDIS_CONN_STRING: "redis://:${NEWAPI_V2_REDIS_PASSWORD:-change-me}@newapi-v2-redis:6379/0"
+      SESSION_SECRET: "${NEWAPI_V2_SESSION_SECRET:-change-me-session-secret}"
+      CRYPTO_SECRET: "${NEWAPI_V2_CRYPTO_SECRET:-change-me-crypto-secret}"
+      ERROR_LOG_ENABLED: "${NEWAPI_V2_ERROR_LOG_ENABLED:-true}"
+      BATCH_UPDATE_ENABLED: "${NEWAPI_V2_BATCH_UPDATE_ENABLED:-true}"
+      MAX_REQUEST_BODY_MB: "${NEWAPI_V2_MAX_REQUEST_BODY_MB:-10240}"
+      MAX_FILE_DOWNLOAD_MB: "${NEWAPI_V2_MAX_FILE_DOWNLOAD_MB:-10240}"
+      NODE_NAME: "${NEWAPI_V2_NODE_NAME:-newapi-v2-node-1}"
+    depends_on:
+      newapi-v2-postgres:
+        condition: service_healthy
+      newapi-v2-redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O - http://127.0.0.1:3000/api/status | grep -Eq '\"success\"[[:space:]]*:[[:space:]]*true'",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - public-net
+      - newapi-v2-internal
+
+  newapi-v2-postgres:
+    image: "${NEWAPI_V2_POSTGRES_IMAGE:-postgres:15}"
+    restart: unless-stopped
+    environment:
+      TZ: "${TZ:-Asia/Shanghai}"
+      POSTGRES_USER: "${NEWAPI_V2_POSTGRES_USER:-newapi_v2}"
+      POSTGRES_PASSWORD: "${NEWAPI_V2_POSTGRES_PASSWORD:-change-me}"
+      POSTGRES_DB: "${NEWAPI_V2_POSTGRES_DB:-newapi_v2}"
+    volumes:
+      - newapi-v2-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NEWAPI_V2_POSTGRES_USER:-newapi_v2} -d ${NEWAPI_V2_POSTGRES_DB:-newapi_v2}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - newapi-v2-internal
+
+  newapi-v2-redis:
+    image: "${NEWAPI_V2_REDIS_IMAGE:-redis:7-alpine}"
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${NEWAPI_V2_REDIS_PASSWORD:-change-me}"]
+    environment:
+      REDISCLI_AUTH: "${NEWAPI_V2_REDIS_PASSWORD:-change-me}"
+    volumes:
+      - newapi-v2-redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDISCLI_AUTH}\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - newapi-v2-internal
+
+YAML
+  fi
+
+  if [[ "$include_services" == "true" ]] && needs_cliproxy_config; then
+    cat >> "$compose_file" <<'YAML'
   cli-proxy-api:
     image: "${CLIPROXY_IMAGE:-eceasy/cli-proxy-api:latest}"
     restart: unless-stopped
@@ -2183,12 +2644,17 @@ YAML
 
   cat >> "$compose_file" <<'YAML'
     volumes:
-      - ./cliproxyapi/config.yaml:/CLIProxyAPI/config.yaml
-      - ./cliproxyapi/auths:/root/.cli-proxy-api
-      - ./cliproxyapi/logs:/CLIProxyAPI/logs
+      - ${STACK_DIR:-/opt/ai-api-stack}/cliproxyapi/config.yaml:/CLIProxyAPI/config.yaml
+      - ${STACK_DIR:-/opt/ai-api-stack}/cliproxyapi/auths:/root/.cli-proxy-api
+      - ${STACK_DIR:-/opt/ai-api-stack}/cliproxyapi/logs:/CLIProxyAPI/logs
     networks:
       - public-net
 
+YAML
+  fi
+
+  if [[ "$include_services" == "true" ]] && needs_sub2api_config; then
+    cat >> "$compose_file" <<'YAML'
   sub2api:
     image: "${SUB2API_IMAGE:-weishaw/sub2api:latest}"
     restart: unless-stopped
@@ -2197,7 +2663,7 @@ YAML
         soft: 100000
         hard: 100000
     volumes:
-      - ./sub2api/data:/app/data
+      - ${STACK_DIR:-/opt/ai-api-stack}/sub2api/data:/app/data
     environment:
       AUTO_SETUP: "true"
       SERVER_HOST: "0.0.0.0"
@@ -2296,6 +2762,11 @@ YAML
     networks:
       - sub2api-internal
 
+YAML
+  fi
+
+  if [[ "$include_services" == "true" ]] && needs_gpt_image_webui_config; then
+    cat >> "$compose_file" <<'YAML'
   gpt-image-2-webui:
     image: "${GPT_IMAGE_WEBUI_IMAGE:-tannic666/gpt-image-2-webui:latest}"
     restart: unless-stopped
@@ -2323,11 +2794,42 @@ YAML
 
   cat >> "$compose_file" <<'YAML'
     volumes:
-      - ./gpt-image-2-webui/generated-images:/app/generated-images
-      - ./gpt-image-2-webui/logs:/app/logs
+      - ${STACK_DIR:-/opt/ai-api-stack}/gpt-image-2-webui/generated-images:/app/generated-images
+      - ${STACK_DIR:-/opt/ai-api-stack}/gpt-image-2-webui/logs:/app/logs
     networks:
       - public-net
 
+YAML
+  fi
+
+  if [[ "$include_services" == "true" ]] && needs_gemini_image_desk_config; then
+    cat >> "$compose_file" <<'YAML'
+  gemini-image-desk:
+    image: "${GEMINI_IMAGE_DESK_IMAGE:-tannic666/gemini-image-desk:latest}"
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      GEMINI_BASE_URL: "${GEMINI_IMAGE_DESK_BASE_URL:-https://generativelanguage.googleapis.com}"
+      GEMINI_DEFAULT_MODEL: "${GEMINI_IMAGE_DESK_DEFAULT_MODEL:-gemini-2.5-flash-image}"
+      PUBLIC_BASE_URL_CONFIG: "${GEMINI_IMAGE_DESK_PUBLIC_BASE_URL_CONFIG:-false}"
+YAML
+
+    if [[ "$GEMINI_IMAGE_DESK_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+      cat >> "$compose_file" <<'YAML'
+    ports:
+      - "${GEMINI_IMAGE_DESK_HOST_PORT:-3003}:3000"
+YAML
+    fi
+
+    cat >> "$compose_file" <<'YAML'
+    networks:
+      - public-net
+
+YAML
+  fi
+
+  if [[ "$include_nginx" == "true" ]]; then
+    cat >> "$compose_file" <<'YAML'
   nginx:
     image: "${NGINX_IMAGE:-nginx:alpine}"
     restart: unless-stopped
@@ -2355,6 +2857,16 @@ YAML
       - "${NGINX_LAN_WEBUI_PORT:-8082}:8082"
 YAML
     fi
+    if needs_newapi_v2_config; then
+      cat >> "$compose_file" <<'YAML'
+      - "${NGINX_LAN_NEWAPI_V2_PORT:-8083}:8083"
+YAML
+    fi
+    if needs_gemini_image_desk_config; then
+      cat >> "$compose_file" <<'YAML'
+      - "${NGINX_LAN_GEMINI_IMAGE_DESK_PORT:-8084}:8084"
+YAML
+    fi
   else
     cat >> "$compose_file" <<'YAML'
       - "${NGINX_HTTP_PORT:-80}:80"
@@ -2369,41 +2881,74 @@ YAML
 
   cat >> "$compose_file" <<'YAML'
     volumes:
-      - ./nginx/conf.d/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${STACK_DIR:-/opt/ai-api-stack}/nginx/conf.d/default.conf:/etc/nginx/conf.d/default.conf:ro
 YAML
 
   if [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" && "$NGINX_ENABLE_HTTPS" == "true" ]]; then
     cat >> "$compose_file" <<'YAML'
-      - ./nginx/certs:/etc/nginx/certs:ro
+      - ${STACK_DIR:-/opt/ai-api-stack}/nginx/certs:/etc/nginx/certs:ro
+YAML
+  fi
+
+  if [[ "$include_nginx_depends" == "true" ]]; then
+    cat >> "$compose_file" <<'YAML'
+    depends_on:
+YAML
+    needs_newapi_config && cat >> "$compose_file" <<'YAML'
+      - new-api
+YAML
+    needs_cliproxy_config && cat >> "$compose_file" <<'YAML'
+      - cli-proxy-api
+YAML
+    needs_sub2api_config && cat >> "$compose_file" <<'YAML'
+      - sub2api
+YAML
+    needs_gpt_image_webui_config && cat >> "$compose_file" <<'YAML'
+      - gpt-image-2-webui
+YAML
+    needs_newapi_v2_config && cat >> "$compose_file" <<'YAML'
+      - newapi-v2
+YAML
+    needs_gemini_image_desk_config && cat >> "$compose_file" <<'YAML'
+      - gemini-image-desk
 YAML
   fi
 
   cat >> "$compose_file" <<'YAML'
-    depends_on:
-YAML
-  needs_newapi_config && cat >> "$compose_file" <<'YAML'
-      - new-api
-YAML
-  needs_cliproxy_config && cat >> "$compose_file" <<'YAML'
-      - cli-proxy-api
-YAML
-  needs_sub2api_config && cat >> "$compose_file" <<'YAML'
-      - sub2api
-YAML
-  needs_gpt_image_webui_config && cat >> "$compose_file" <<'YAML'
-      - gpt-image-2-webui
-YAML
-
-  cat >> "$compose_file" <<'YAML'
     networks:
       - public-net
+YAML
+  fi
+
+  if [[ "$include_services" == "true" ]] && { needs_newapi_config || needs_newapi_v2_config || needs_sub2api_config; }; then
+    cat >> "$compose_file" <<'YAML'
 
 volumes:
+YAML
+
+    if needs_newapi_config; then
+      cat >> "$compose_file" <<'YAML'
   postgres-data:
   redis-data:
+YAML
+    fi
+
+    if needs_newapi_v2_config; then
+      cat >> "$compose_file" <<'YAML'
+  newapi-v2-postgres-data:
+  newapi-v2-redis-data:
+YAML
+    fi
+
+    if needs_sub2api_config; then
+      cat >> "$compose_file" <<'YAML'
   sub2api-postgres-data:
   sub2api-redis-data:
+YAML
+    fi
+  fi
 
+  cat >> "$compose_file" <<'YAML'
 networks:
 YAML
 
@@ -2420,21 +2965,75 @@ YAML
 YAML
   fi
 
-  cat >> "$compose_file" <<'YAML'
+  if [[ "$include_services" == "true" ]] && needs_newapi_config; then
+    cat >> "$compose_file" <<'YAML'
   stack-internal:
     driver: bridge
+YAML
+  fi
+
+  if [[ "$include_services" == "true" ]] && needs_newapi_v2_config; then
+    cat >> "$compose_file" <<'YAML'
+  newapi-v2-internal:
+    driver: bridge
+YAML
+  fi
+
+  if [[ "$include_services" == "true" ]] && needs_sub2api_config; then
+    cat >> "$compose_file" <<'YAML'
   sub2api-internal:
     driver: bridge
 YAML
+  fi
+}
+
+write_service_compose_for() {
+  local target_file="$1"
+  local service="$2"
+  local old_deploy_all="$DEPLOY_ALL"
+  local old_selected=("${SELECTED_SERVICES[@]}")
+
+  DEPLOY_ALL=false
+  SELECTED_SERVICES=("$service")
+  write_compose_file "$target_file" "false" "false"
+
+  DEPLOY_ALL="$old_deploy_all"
+  SELECTED_SERVICES=("${old_selected[@]}")
+}
+
+write_service_compose_files() {
+  local include_newapi="false"
+  local include_newapi_v2="false"
+  local include_cliproxy="false"
+  local include_sub2api="false"
+  local include_webui="false"
+  local include_gemini_desk="false"
+
+  needs_newapi_config && include_newapi="true"
+  needs_newapi_v2_config && include_newapi_v2="true"
+  needs_cliproxy_config && include_cliproxy="true"
+  needs_sub2api_config && include_sub2api="true"
+  needs_gpt_image_webui_config && include_webui="true"
+  needs_gemini_image_desk_config && include_gemini_desk="true"
+
+  [[ "$include_newapi" == "true" ]] && write_service_compose_for "$STACK_DIR/new-api/docker-compose.yml" "new-api"
+  [[ "$include_newapi_v2" == "true" ]] && write_service_compose_for "$STACK_DIR/newapi-v2/docker-compose.yml" "newapi-v2"
+  [[ "$include_cliproxy" == "true" ]] && write_service_compose_for "$STACK_DIR/cliproxyapi/docker-compose.yml" "cli-proxy-api"
+  [[ "$include_sub2api" == "true" ]] && write_service_compose_for "$STACK_DIR/sub2api/docker-compose.yml" "sub2api"
+  [[ "$include_webui" == "true" ]] && write_service_compose_for "$STACK_DIR/gpt-image-2-webui/docker-compose.yml" "gpt-image-2-webui"
+  [[ "$include_gemini_desk" == "true" ]] && write_service_compose_for "$STACK_DIR/gemini-image-desk/docker-compose.yml" "gemini-image-desk"
+
+  write_compose_file "$STACK_DIR/nginx/docker-compose.yml" "true" "false" "false"
 }
 
 write_files() {
   prepare_directories
   write_env_file
-  write_clipproxy_config
+  needs_cliproxy_config && write_clipproxy_config
   write_nginx_conf
   validate_nginx_certificates
   write_compose_file
+  write_service_compose_files
 }
 
 ensure_app_net() {
@@ -2474,7 +3073,7 @@ safe_remove_dir() {
 }
 
 run_compose() {
-  local args=(--env-file "$STACK_DIR/.env" up -d)
+  local args=(--env-file "$STACK_DIR/.env" up -d --remove-orphans)
 
   if [[ "$DEPLOY_ALL" != "true" ]]; then
     args+=("${SELECTED_SERVICES[@]}")
@@ -2497,16 +3096,22 @@ print_summary() {
   local admin_primary=""
   local sub2api_primary=""
   local webui_primary=""
+  local newapi_v2_primary=""
+  local gemini_desk_primary=""
   local newapi_url=""
   local cliproxy_url=""
   local sub2api_url=""
   local webui_url=""
+  local newapi_v2_url=""
+  local gemini_desk_url=""
 
   lan_ip="$(detect_lan_ip)"
   api_primary="$(first_word "$NGINX_API_SERVER_NAMES_VALUE")"
   admin_primary="$(first_word "$NGINX_ADMIN_SERVER_NAME_VALUE")"
   sub2api_primary="$(first_word "$NGINX_SUB2API_SERVER_NAMES_VALUE")"
   webui_primary="$(first_word "$NGINX_WEBUI_SERVER_NAMES_VALUE")"
+  newapi_v2_primary="$(first_word "$NGINX_NEWAPI_V2_SERVER_NAMES_VALUE")"
+  gemini_desk_primary="$(first_word "$NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE")"
 
   if needs_nginx_config; then
     if [[ "$NGINX_DEPLOY_MODE_VALUE" == "lan" ]]; then
@@ -2515,34 +3120,45 @@ print_summary() {
         cliproxy_url="http://${lan_ip}:${NGINX_LAN_ADMIN_PORT_VALUE}"
         sub2api_url="http://${lan_ip}:${NGINX_LAN_SUB2API_PORT_VALUE}"
         webui_url="http://${lan_ip}:${NGINX_LAN_WEBUI_PORT_VALUE}"
+        newapi_v2_url="http://${lan_ip}:${NGINX_LAN_NEWAPI_V2_PORT_VALUE}"
+        gemini_desk_url="http://${lan_ip}:${NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE}"
       else
         newapi_url="http://服务器IP:${NGINX_LAN_API_PORT_VALUE}"
         cliproxy_url="http://服务器IP:${NGINX_LAN_ADMIN_PORT_VALUE}"
         sub2api_url="http://服务器IP:${NGINX_LAN_SUB2API_PORT_VALUE}"
         webui_url="http://服务器IP:${NGINX_LAN_WEBUI_PORT_VALUE}"
+        newapi_v2_url="http://服务器IP:${NGINX_LAN_NEWAPI_V2_PORT_VALUE}"
+        gemini_desk_url="http://服务器IP:${NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE}"
       fi
     elif [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
       newapi_url="$(url_with_port https "$api_primary" "$NGINX_HTTPS_PORT_VALUE")"
       cliproxy_url="$(url_with_port https "$admin_primary" "$NGINX_HTTPS_PORT_VALUE")"
       sub2api_url="$(url_with_port https "$sub2api_primary" "$NGINX_HTTPS_PORT_VALUE")"
       webui_url="$(url_with_port https "$webui_primary" "$NGINX_HTTPS_PORT_VALUE")"
+      newapi_v2_url="$(url_with_port https "$newapi_v2_primary" "$NGINX_HTTPS_PORT_VALUE")"
+      gemini_desk_url="$(url_with_port https "$gemini_desk_primary" "$NGINX_HTTPS_PORT_VALUE")"
     else
       newapi_url="$(url_with_port http "$api_primary" "$NGINX_HTTP_PORT_VALUE")"
       cliproxy_url="$(url_with_port http "$admin_primary" "$NGINX_HTTP_PORT_VALUE")"
       sub2api_url="$(url_with_port http "$sub2api_primary" "$NGINX_HTTP_PORT_VALUE")"
       webui_url="$(url_with_port http "$webui_primary" "$NGINX_HTTP_PORT_VALUE")"
+      newapi_v2_url="$(url_with_port http "$newapi_v2_primary" "$NGINX_HTTP_PORT_VALUE")"
+      gemini_desk_url="$(url_with_port http "$gemini_desk_primary" "$NGINX_HTTP_PORT_VALUE")"
     fi
   else
     newapi_url="http://服务器IP:${NEWAPI_HOST_PORT_VALUE}"
     cliproxy_url="http://服务器IP:${CLIPROXY_PORT_8317_VALUE}"
     sub2api_url="http://服务器IP:${SUB2API_HOST_PORT_VALUE}"
     webui_url="http://服务器IP:${GPT_IMAGE_WEBUI_HOST_PORT_VALUE}"
+    newapi_v2_url="http://服务器IP:${NEWAPI_V2_HOST_PORT_VALUE}"
+    gemini_desk_url="http://服务器IP:${GEMINI_IMAGE_DESK_HOST_PORT_VALUE}"
   fi
 
   section_title "部署完成"
   field_line "安装目录：" "$STACK_DIR"
   field_line "Compose 文件：" "$STACK_DIR/docker-compose.yml"
   field_line "环境文件：" "$STACK_DIR/.env"
+  field_line "服务 Compose：" "已写入已选服务目录和 $STACK_DIR/nginx/docker-compose.yml"
 
   if needs_nginx_config; then
     section_title "Nginx 入口"
@@ -2552,12 +3168,16 @@ print_summary() {
       needs_cliproxy_config && field_line "CPA 入口端口：" "$NGINX_LAN_ADMIN_PORT_VALUE"
       needs_sub2api_config && field_line "Sub2API 入口端口：" "$NGINX_LAN_SUB2API_PORT_VALUE"
       needs_gpt_image_webui_config && field_line "GPT Image WebUI 入口端口：" "$NGINX_LAN_WEBUI_PORT_VALUE"
+      needs_newapi_v2_config && field_line "新版 NewAPI 入口端口：" "$NGINX_LAN_NEWAPI_V2_PORT_VALUE"
+      needs_gemini_image_desk_config && field_line "Gemini Image Desk 入口端口：" "$NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE"
     else
       field_line "Nginx 模式：" "公网，按域名转发。"
       needs_newapi_config && field_line "New API 绑定域名：" "$NGINX_API_SERVER_NAMES_VALUE"
       needs_cliproxy_config && field_line "CPA 绑定域名：" "$NGINX_ADMIN_SERVER_NAME_VALUE"
       needs_sub2api_config && field_line "Sub2API 绑定域名：" "$NGINX_SUB2API_SERVER_NAMES_VALUE"
       needs_gpt_image_webui_config && field_line "GPT Image WebUI 绑定域名：" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
+      needs_newapi_v2_config && field_line "新版 NewAPI 绑定域名：" "$NGINX_NEWAPI_V2_SERVER_NAMES_VALUE"
+      needs_gemini_image_desk_config && field_line "Gemini Image Desk 绑定域名：" "$NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE"
       field_line "公网 HTTP 端口：" "$NGINX_HTTP_PORT_VALUE"
       if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
         field_line "公网 HTTPS 端口：" "$NGINX_HTTPS_PORT_VALUE"
@@ -2588,6 +3208,27 @@ print_summary() {
       field_line "直连端口：" "$NEWAPI_HOST_PORT_VALUE"
     else
       subtle_note "New API 未映射宿主机端口，只通过 Nginx / Docker 网络访问。"
+    fi
+  fi
+
+  if needs_newapi_v2_config; then
+    section_title "新版 NewAPI 信息"
+    field_line "访问地址：" "$newapi_v2_url"
+    field_line "镜像：" "$NEWAPI_V2_IMAGE_VALUE"
+    if [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" && "$NGINX_NEWAPI_V2_SERVER_NAMES_VALUE" != "" ]]; then
+      field_line "绑定域名：" "$NGINX_NEWAPI_V2_SERVER_NAMES_VALUE"
+    fi
+    field_line "PostgreSQL 用户名：" "$NEWAPI_V2_POSTGRES_USER_VALUE"
+    field_line "PostgreSQL 密码：" "$NEWAPI_V2_POSTGRES_PASSWORD_VALUE"
+    field_line "PostgreSQL 数据库名：" "$NEWAPI_V2_POSTGRES_DB_VALUE"
+    field_line "Redis 密码：" "$NEWAPI_V2_REDIS_PASSWORD_VALUE"
+    field_line "SESSION_SECRET：" "$NEWAPI_V2_SESSION_SECRET_VALUE"
+    field_line "CRYPTO_SECRET：" "$NEWAPI_V2_CRYPTO_SECRET_VALUE"
+    subtle_note "新版 NewAPI 与旧版 new-api 使用独立目录、独立 PostgreSQL 和独立 Redis。"
+    if [[ "$NEWAPI_V2_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+      field_line "直连端口：" "$NEWAPI_V2_HOST_PORT_VALUE"
+    else
+      subtle_note "新版 NewAPI 未映射宿主机端口，只通过 Nginx / Docker 网络访问。"
     fi
   fi
 
@@ -2658,6 +3299,23 @@ print_summary() {
     subtle_note "GPT Image WebUI 已加入 public-net；默认就是外部 app-net。"
   fi
 
+  if needs_gemini_image_desk_config; then
+    section_title "Gemini Image Desk 信息"
+    field_line "访问地址：" "$gemini_desk_url"
+    field_line "镜像：" "$GEMINI_IMAGE_DESK_IMAGE_VALUE"
+    field_line "默认 Base URL：" "$GEMINI_IMAGE_DESK_BASE_URL_VALUE"
+    field_line "默认模型：" "$GEMINI_IMAGE_DESK_DEFAULT_MODEL_VALUE"
+    if needs_nginx_config && [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" && "$NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE" != "" ]]; then
+      field_line "绑定域名：" "$NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE"
+    fi
+    if [[ "$GEMINI_IMAGE_DESK_PUBLISH_HOST_PORT_VALUE" != "true" ]]; then
+      subtle_note "Gemini Image Desk 未映射宿主机端口，只通过 Nginx / Docker 网络访问。"
+    else
+      field_line "直连端口：" "$GEMINI_IMAGE_DESK_HOST_PORT_VALUE"
+    fi
+    subtle_note "Gemini Image Desk 的 API Key 默认由用户在页面填写并保存在浏览器本地。"
+  fi
+
   if [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" && "$NGINX_ENABLE_HTTPS" == "true" ]]; then
     section_title "证书信息"
     field_line "证书目录：" "$STACK_DIR/nginx/certs"
@@ -2675,6 +3333,10 @@ print_summary() {
       needs_sub2api_config && field_line "Sub2API 私钥：" "$NGINX_SUB2API_KEY_VALUE"
       needs_gpt_image_webui_config && field_line "GPT Image WebUI 证书：" "$NGINX_WEBUI_CERT_VALUE"
       needs_gpt_image_webui_config && field_line "GPT Image WebUI 私钥：" "$NGINX_WEBUI_KEY_VALUE"
+      needs_newapi_v2_config && field_line "新版 NewAPI 证书：" "$NGINX_NEWAPI_V2_CERT_VALUE"
+      needs_newapi_v2_config && field_line "新版 NewAPI 私钥：" "$NGINX_NEWAPI_V2_KEY_VALUE"
+      needs_gemini_image_desk_config && field_line "Gemini Image Desk 证书：" "$NGINX_GEMINI_IMAGE_DESK_CERT_VALUE"
+      needs_gemini_image_desk_config && field_line "Gemini Image Desk 私钥：" "$NGINX_GEMINI_IMAGE_DESK_KEY_VALUE"
     fi
   fi
 }
@@ -2885,6 +3547,38 @@ prepare_certificate_directory() {
   mkdir -p "$STACK_DIR/nginx/certs"
 }
 
+install_acme_certificate_files() {
+  local base_domain="$1"
+  local cert_file="$2"
+  local key_file="$3"
+  local include_wildcard="$4"
+  local cert_path=""
+  local key_path=""
+  local reload_script=""
+  local reload_cmd=""
+
+  cert_path="$STACK_DIR/nginx/certs/$cert_file"
+  key_path="$STACK_DIR/nginx/certs/$key_file"
+  reload_script="$(write_acme_reload_script)"
+  reload_cmd="$(dotenv_quote "$reload_script")"
+
+  section_title "安装证书"
+  "$ACME_SH_BIN" --install-cert -d "$base_domain" \
+    --key-file "$key_path" \
+    --fullchain-file "$cert_path" \
+    --reloadcmd "$reload_cmd"
+
+  write_last_certificate_metadata "$base_domain" "$cert_file" "$key_file" "$include_wildcard"
+
+  section_title "证书完成"
+  field_line "证书目录：" "$STACK_DIR/nginx/certs"
+  field_line "fullchain：" "$cert_file"
+  field_line "私钥：" "$key_file"
+  field_line "证书记忆：" "$(last_certificate_metadata_file)"
+  field_line "Nginx 重载脚本：" "$reload_script"
+  subtle_note "部署公网 HTTPS 时选择共用证书，并填写上面的 fullchain 和私钥文件名即可。"
+}
+
 issue_aliyun_certificate() {
   local base_domain=""
   local include_wildcard="true"
@@ -2893,10 +3587,6 @@ issue_aliyun_certificate() {
   local use_existing_ali="false"
   local cert_file=""
   local key_file=""
-  local cert_path=""
-  local key_path=""
-  local reload_script=""
-  local reload_cmd=""
   local domain_args=()
 
   section_title "阿里云 DNS 签发证书"
@@ -2936,34 +3626,68 @@ issue_aliyun_certificate() {
 
   read_line cert_file "安装后的 fullchain 证书文件名" "${base_domain}.fullchain.cer"
   read_line key_file "安装后的私钥文件名" "${base_domain}.key"
-  cert_path="$STACK_DIR/nginx/certs/$cert_file"
-  key_path="$STACK_DIR/nginx/certs/$key_file"
-  reload_script="$(write_acme_reload_script)"
-  reload_cmd="$(dotenv_quote "$reload_script")"
 
   section_title "签发证书"
   "$ACME_SH_BIN" --issue --dns dns_ali "${domain_args[@]}"
 
-  section_title "安装证书"
-  "$ACME_SH_BIN" --install-cert -d "$base_domain" \
-    --key-file "$key_path" \
-    --fullchain-file "$cert_path" \
-    --reloadcmd "$reload_cmd"
+  install_acme_certificate_files "$base_domain" "$cert_file" "$key_file" "$include_wildcard"
+}
 
-  write_last_certificate_metadata "$base_domain" "$cert_file" "$key_file" "$include_wildcard"
+issue_manual_dns_certificate() {
+  local base_domain=""
+  local include_wildcard="true"
+  local cert_file=""
+  local key_file=""
+  local continue_confirm=""
+  local issue_status=0
+  local domain_args=()
 
-  section_title "证书完成"
-  field_line "证书目录：" "$STACK_DIR/nginx/certs"
-  field_line "fullchain：" "$cert_file"
-  field_line "私钥：" "$key_file"
-  field_line "证书记忆：" "$(last_certificate_metadata_file)"
-  field_line "Nginx 重载脚本：" "$reload_script"
-  subtle_note "部署公网 HTTPS 时选择共用证书，并填写上面的 fullchain 和私钥文件名即可。"
+  section_title "手动 DNS 签发证书"
+  ensure_acme_sh
+  set_acme_default_ca
+  prepare_certificate_directory
+
+  subtle_note "手动 DNS 基本适用于所有能编辑 DNS 解析的域名服务商。"
+  subtle_note "注意：手动 DNS 模式不能无人值守自动续期；每次续期都需要重新添加 TXT 记录。"
+
+  read_line base_domain "主域名，例如 774966.xyz" ""
+  [[ -n "$base_domain" ]] || die "主域名不能为空。"
+  read_yes_no include_wildcard "是否同时签发泛域名 *.${base_domain}" "$include_wildcard"
+
+  domain_args=(-d "$base_domain")
+  if [[ "$include_wildcard" == "true" ]]; then
+    domain_args+=(-d "*.${base_domain}")
+  fi
+
+  read_line cert_file "安装后的 fullchain 证书文件名" "${base_domain}.fullchain.cer"
+  read_line key_file "安装后的私钥文件名" "${base_domain}.key"
+
+  section_title "生成 DNS TXT 记录"
+  subtle_note "下面 acme.sh 会输出需要添加的 _acme-challenge TXT 记录。请在你的 DNS 控制台添加全部 TXT 记录。"
+  set +e
+  "$ACME_SH_BIN" --issue --dns "${domain_args[@]}" \
+    --yes-I-know-dns-manual-mode-enough-go-ahead-please
+  issue_status="$?"
+  set -e
+
+  if (( issue_status != 0 )); then
+    subtle_note "手动 DNS 模式第一步通常会在输出 TXT 记录后停止；这不一定表示失败。"
+  fi
+
+  read_line continue_confirm "TXT 记录添加完成并等待解析生效后，按回车继续验证" ""
+
+  section_title "验证并签发证书"
+  "$ACME_SH_BIN" --renew -d "$base_domain" \
+    --yes-I-know-dns-manual-mode-enough-go-ahead-please
+
+  install_acme_certificate_files "$base_domain" "$cert_file" "$key_file" "$include_wildcard"
+  subtle_note "该证书使用手动 DNS 模式，后续续期仍需人工处理 TXT 记录；如需自动续期，建议改用 DNS API 模式。"
 }
 
 renew_acme_certificates() {
   section_title "手动续签证书"
   ensure_acme_sh
+  subtle_note "注意：手动 DNS 模式证书不能无人值守自动续期；acme.sh --cron 主要适用于 DNS API 等可自动验证的证书。"
   "$ACME_SH_BIN" --cron
 }
 
@@ -2971,9 +3695,10 @@ show_certificate_menu() {
   section_title "SSL 证书 / acme.sh"
   menu_option "$COLOR_GREEN" "[1]" "检查/安装 acme.sh"
   menu_option "$COLOR_CYAN" "[2]" "阿里云 DNS 签发并安装证书"
-  menu_option "$COLOR_BLUE" "[3]" "手动续签全部证书"
-  menu_option "$COLOR_MAGENTA" "[4]" "查看 acme.sh 版本"
-  menu_option "$COLOR_DIM" "[5]" "返回/退出"
+  menu_option "$COLOR_MAGENTA" "[3]" "手动 DNS 签发并安装证书"
+  menu_option "$COLOR_BLUE" "[4]" "手动续签全部证书"
+  menu_option "$COLOR_MAGENTA" "[5]" "查看 acme.sh 版本"
+  menu_option "$COLOR_DIM" "[6]" "返回/退出"
 }
 
 manage_certificates() {
@@ -2990,18 +3715,21 @@ manage_certificates() {
       2|issue|cert|ssl|aliyun|ali|dns_ali)
         issue_aliyun_certificate
         ;;
-      3|renew|cron)
+      3|manual|manual-dns|dns-manual|txt|dns_txt)
+        issue_manual_dns_certificate
+        ;;
+      4|renew|cron)
         renew_acme_certificates
         ;;
-      4|version|-v|--version)
+      5|version|-v|--version)
         ensure_acme_sh
         "$ACME_SH_BIN" --version || true
         ;;
-      5|back|exit|quit|q)
+      6|back|exit|quit|q)
         return 0
         ;;
       *)
-        printf '%s\n' "$(color_text "$COLOR_YELLOW" "请输入 1-5。")"
+        printf '%s\n' "$(color_text "$COLOR_YELLOW" "请输入 1-6。")"
         ;;
     esac
   done

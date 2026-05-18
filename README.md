@@ -1,6 +1,6 @@
 <div align="center">
   <h1>AI API Stack 一键部署脚本</h1>
-  <p><strong>Docker / nginx / new-api / cli-proxy-api / sub2api / gpt-image-2-webui / PostgreSQL / Redis</strong></p>
+  <p><strong>Docker / nginx / new-api / newapi-v2 / cli-proxy-api / sub2api / gpt-image-2-webui / gemini-image-desk / PostgreSQL / Redis</strong></p>
   <p>一个交互式 Shell 脚本，从 Docker 环境准备到服务部署、证书、更新和 Nginx 运维都集中到一个入口。</p>
   <p>
     <img src="https://img.shields.io/badge/Debian-12-A81D33?style=for-the-badge&logo=debian&logoColor=white" alt="Debian 12" />
@@ -20,18 +20,21 @@
 
 ## 1. 脚本说明
 
-`one-click/deploy.sh` 是一个面向 Docker Compose 的一键部署和运维脚本，主要用于部署 `nginx`、`new-api`、`cli-proxy-api`、`sub2api` 和 `gpt-image-2-webui`。
+`one-click/deploy.sh` 是一个面向 Docker Compose 的一键部署和运维脚本，主要用于部署 `nginx`、旧版 `new-api`、新版 `newapi-v2`、`cli-proxy-api`、`sub2api`、`gpt-image-2-webui` 和 `gemini-image-desk`。
 
 - Debian 12 一键安装/检查 Docker
 - 固定使用 `/opt/ai-api-stack/` 作为安装和运维目录
-- 自动生成 `docker-compose.yml`、`.env`、`nginx/conf.d/default.conf`
-- `new-api` 自动带 PostgreSQL 和 Redis
+- 自动生成根 `docker-compose.yml`、`.env`、`nginx/conf.d/default.conf`
+- 根 `docker-compose.yml` 只包含本次选择的服务；每个已选服务目录内也会生成对应的 `docker-compose.yml`
+- 旧版 `new-api` 自动带 PostgreSQL 和 Redis
+- 新版 `newapi-v2` 使用 `tannic666/newapi:latest`，自动带独立 PostgreSQL 和 Redis
 - `sub2api` 自动带独立 PostgreSQL 和 Redis
 - 支持部署 `gpt-image-2-webui`，默认可通过 Docker 内网连接 New API
-- Sub2API 和 GPT Image WebUI 应用容器默认加入同一个 `public-net`，外部网络名默认是 `app-net`
+- 支持部署 `gemini-image-desk`，镜像为 `tannic666/gemini-image-desk:latest`
+- Sub2API、GPT Image WebUI、Gemini Image Desk 等应用容器默认加入同一个 `public-net`，外部网络名默认是 `app-net`
 - 支持局域网部署和公网域名部署
 - 支持公网 HTTPS、80 跳转 443、共用证书
-- 支持 acme.sh + 阿里云 DNS 签发泛域名证书，并在后续 HTTPS 配置中自动复用上次证书文件名
+- 支持 acme.sh + 阿里云 DNS API 或手动 DNS TXT 签发泛域名证书，并在后续 HTTPS 配置中自动复用上次证书文件名
 - 支持按需配置 Docker 国内镜像源
 - 支持更新镜像、重建容器、Nginx 测试/重载/重启/日志
 
@@ -147,7 +150,7 @@ bash one-click/deploy.sh docker
 bash one-click/deploy.sh cert
 ```
 
-推荐流程：
+阿里云 DNS API 推荐流程：
 
 1. 在阿里云 RAM 创建用于 DNS 的用户。
 2. 给该用户授权 `AliyunDNSFullAccess` 或等价 DNS 解析权限。
@@ -157,7 +160,17 @@ bash one-click/deploy.sh cert
 6. 将证书安装到 `/opt/ai-api-stack/nginx/certs/`。
 7. 部署公网 HTTPS 时填写生成的证书文件名。
 
+通用手动 DNS 流程：
+
+1. 在证书菜单中选择手动 DNS 签发。
+2. 输入主域名，并选择是否同时签发泛域名。
+3. 按脚本输出，在 DNS 控制台添加 `_acme-challenge` TXT 记录。
+4. 等待 DNS 生效后按回车继续验证。
+5. 证书会安装到 `/opt/ai-api-stack/nginx/certs/`。
+
 DNS 方式签发证书不依赖 Nginx 是否已经启动，所以可以先申请证书再部署项目。已经部署过也可以后补证书，然后通过 Nginx 管理菜单重载。
+
+注意：阿里云 DNS API 模式可以由 acme.sh 自动续期；手动 DNS TXT 模式基本通用，但不能无人值守自动续期，每次续期都需要重新添加 TXT 记录。
 
 ### 4.3 一键部署服务
 
@@ -181,10 +194,10 @@ bash one-click/deploy.sh deploy
 all
 1
 2
-1234
+123456
 1 2
-1,2
-new-api sub2api webui
+1,5
+new-api sub2api webui newapi-v2 gemini
 ```
 
 服务编号含义：
@@ -195,6 +208,8 @@ Nginx 默认作为统一网关必装，不需要选择。
 2 = cli-proxy-api
 3 = sub2api，自动带独立 PostgreSQL + Redis
 4 = gpt-image-2-webui
+5 = newapi-v2，新版 NewAPI，镜像 tannic666/newapi，自动带独立 PostgreSQL + Redis
+6 = gemini-image-desk，镜像 tannic666/gemini-image-desk
 ```
 
 常用选择：
@@ -204,10 +219,14 @@ Nginx 默认作为统一网关必装，不需要选择。
 - `2`：只部署 CPA / CLIProxyAPI，并生成对应 Nginx 入口
 - `3`：只部署 Sub2API，并生成对应 Nginx 入口
 - `4`：只部署 GPT Image WebUI，并生成对应 Nginx 入口
+- `5`：只部署新版 NewAPI，并生成对应 Nginx 入口
+- `6`：只部署 Gemini Image Desk，并生成对应 Nginx 入口
 - `12`：部署 New API + CPA
 - `13`：部署 New API + Sub2API
 - `124`：部署 New API + CPA + GPT Image WebUI
-- `1234`：部署 New API + CPA + Sub2API + GPT Image WebUI
+- `15`：同时部署旧版 New API + 新版 NewAPI
+- `56`：部署新版 NewAPI + Gemini Image Desk
+- `123456`：部署全部服务
 
 ### 4.4 局域网部署
 
@@ -356,26 +375,38 @@ docker compose down -v --remove-orphans
 
 ## 5. 安装目录结构
 
-部署后会生成：
+部署后会按所选服务生成。`nginx` 是默认网关，会始终生成；未选择的业务服务不会创建对应目录或 Compose 服务块。
+实际启动仍以根目录 `docker-compose.yml` 为入口；服务目录内的 `docker-compose.yml` 用于查看和维护对应模块，复用根目录 `.env`。
 
 ```text
 /opt/ai-api-stack/
-├── docker-compose.yml
-├── .env
+├── docker-compose.yml          # 实际部署入口，只包含本次选择的服务 + nginx
+├── .env                        # 只写入本次选择服务需要的变量 + nginx 变量
 ├── acme-reload-nginx.sh   # 证书菜单生成，可选
-├── new-api/
+├── new-api/                    # 选择 1 时生成
+│   ├── docker-compose.yml
 │   ├── data/
 │   └── logs/
-├── cliproxyapi/
+├── newapi-v2/                  # 选择 5 时生成
+│   ├── docker-compose.yml
+│   ├── data/
+│   └── logs/
+├── cliproxyapi/                # 选择 2 时生成
+│   ├── docker-compose.yml
 │   ├── auths/
 │   ├── logs/
 │   └── config.yaml
-├── sub2api/
+├── sub2api/                    # 选择 3 时生成
+│   ├── docker-compose.yml
 │   └── data/
-├── gpt-image-2-webui/
+├── gpt-image-2-webui/          # 选择 4 时生成
+│   ├── docker-compose.yml
 │   ├── generated-images/
 │   └── logs/
+├── gemini-image-desk/          # 选择 6 时生成
+│   └── docker-compose.yml
 └── nginx/
+    ├── docker-compose.yml
     ├── certs/
     └── conf.d/
         └── default.conf
@@ -385,11 +416,12 @@ docker compose down -v --remove-orphans
 
 - Debian 12 Docker 安装菜单只自动支持 Debian 12。
 - 配置 Docker 镜像源会修改 `/etc/docker/daemon.json`。
-- Nginx 默认必装；New API、CPA、Sub2API 和 GPT Image WebUI 默认不暴露宿主机端口，只通过 Nginx 代理访问。
-- PostgreSQL 和 Redis 是 New API / Sub2API 的依赖，不需要在服务选择里单独选择。
-- New API、CPA、Sub2API 和 GPT Image WebUI 应用容器都会加入 `public-net`；默认情况下它对应外部 Docker 网络 `app-net`。
+- Nginx 默认必装；New API、CPA、Sub2API、GPT Image WebUI 和 Gemini Image Desk 默认不暴露宿主机端口，只通过 Nginx 代理访问。
+- PostgreSQL 和 Redis 是旧版 New API / 新版 NewAPI / Sub2API 的依赖，不需要在服务选择里单独选择。
+- New API、CPA、Sub2API、GPT Image WebUI 和 Gemini Image Desk 应用容器都会加入 `public-net`；默认情况下它对应外部 Docker 网络 `app-net`。
 - Sub2API 的 PostgreSQL 和 Redis 只加入独立内部网络，不暴露给宿主机。
 - GPT Image WebUI 的 `generated-images/` 和 `logs/` 会自动设置为容器可写，避免非 root 容器用户写入图片时报权限错误。
 - `SESSION_SECRET` 和 `CRYPTO_SECRET` 是 New API 内部密钥，不是后台登录密码。
 - 阿里云 `Ali_Key` / `Ali_Secret` 不要公开，泄露后请立即禁用或轮换。
-- 公网 HTTPS 推荐使用泛域名证书，New API、CPA、Sub2API 和 GPT Image WebUI 可以共用同一张证书。
+- 手动 DNS TXT 签发证书不绑定域名服务商，但不能无人值守自动续期；生产环境长期使用推荐 DNS API 模式。
+- 公网 HTTPS 推荐使用泛域名证书，New API、CPA、Sub2API、GPT Image WebUI 和 Gemini Image Desk 可以共用同一张证书。
