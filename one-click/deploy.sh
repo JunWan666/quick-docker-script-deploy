@@ -4159,72 +4159,59 @@ parse_action() {
   esac
 }
 
-main() {
-  local action=""
+read_main_menu_action() {
+  local __var="$1"
+  local selected=""
 
-  init_ui
-  banner
+  show_main_menu
+  while true; do
+    read_line selected "请选择操作" "1"
+    case "$(lower "$selected")" in
+      1|docker|docker-install|install-docker|setup-docker)
+        printf -v "$__var" '%s' "docker"
+        return 0
+        ;;
+      2|cert|ssl|acme|acme.sh|certificate)
+        printf -v "$__var" '%s' "cert"
+        return 0
+        ;;
+      3|deploy|up|install)
+        printf -v "$__var" '%s' "deploy"
+        return 0
+        ;;
+      4|update|pull|upgrade|refresh|sync)
+        printf -v "$__var" '%s' "update"
+        return 0
+        ;;
+      5|nginx|nginx-manage|nginx-manager)
+        printf -v "$__var" '%s' "nginx"
+        return 0
+        ;;
+      6|mirror|docker-mirror|registry-mirror|daemon)
+        printf -v "$__var" '%s' "mirror"
+        return 0
+        ;;
+      7|uninstall|down|remove|rm)
+        printf -v "$__var" '%s' "uninstall"
+        return 0
+        ;;
+      8|misc|miscellaneous|utils|tools|other|others)
+        printf -v "$__var" '%s' "misc"
+        return 0
+        ;;
+      9|exit|quit|q)
+        printf -v "$__var" '%s' "exit"
+        return 0
+        ;;
+      *)
+        printf '%s\n' "$(color_text "$COLOR_YELLOW" "请输入 1 到 9。")"
+        ;;
+    esac
+  done
+}
 
-  if [[ ! -t 0 ]]; then
-    printf '%s\n' "$(color_text "$COLOR_YELLOW" "检测到管道或非交互方式执行，交互式菜单无法稳定读取输入。")"
-    printf '%s\n' "请改用："
-    printf '%s\n' "curl -fsSL https://raw.githubusercontent.com/JunWan666/quick-docker-script-deploy/main/one-click/deploy.sh -o /tmp/deploy.sh && bash /tmp/deploy.sh"
-    return 1
-  fi
-
-  action="$(parse_action "${1-}")"
-  if [[ "$action" == "help" ]]; then
-    print_usage
-    return 0
-  fi
-
-  if [[ -z "${1:-}" && -t 0 ]]; then
-    show_main_menu
-    while true; do
-      read_line action "请选择操作" "1"
-      case "$(lower "$action")" in
-        1|docker|docker-install|install-docker|setup-docker)
-          action="docker"
-          break
-          ;;
-        2|cert|ssl|acme|acme.sh|certificate)
-          action="cert"
-          break
-          ;;
-        3|deploy|up|install)
-          action="deploy"
-          break
-          ;;
-        4|update|pull|upgrade|refresh|sync)
-          action="update"
-          break
-          ;;
-        5|nginx|nginx-manage|nginx-manager)
-          action="nginx"
-          break
-          ;;
-        6|mirror|docker-mirror|registry-mirror|daemon)
-          action="mirror"
-          break
-          ;;
-        7|uninstall|down|remove|rm)
-          action="uninstall"
-          break
-          ;;
-        8|misc|miscellaneous|utils|tools|other|others)
-          action="misc"
-          break
-          ;;
-        9|exit|quit|q)
-          printf '%s\n' "$(color_text "$COLOR_DIM" "已退出。")"
-          return 0
-          ;;
-        *)
-          printf '%s\n' "$(color_text "$COLOR_YELLOW" "请输入 1 到 9。")"
-          ;;
-      esac
-    done
-  fi
+run_action() {
+  local action="$1"
 
   subtle_note "输入支持常规命令行编辑，密码项也会明文显示。"
 
@@ -4266,6 +4253,40 @@ main() {
   ensure_app_net
   run_compose
   print_summary
+}
+
+main() {
+  local action=""
+
+  init_ui
+  banner
+
+  if [[ ! -t 0 ]]; then
+    printf '%s\n' "$(color_text "$COLOR_YELLOW" "检测到管道或非交互方式执行，交互式菜单无法稳定读取输入。")"
+    printf '%s\n' "请改用："
+    printf '%s\n' "curl -fsSL https://raw.githubusercontent.com/JunWan666/quick-docker-script-deploy/main/one-click/deploy.sh -o /tmp/deploy.sh && bash /tmp/deploy.sh"
+    return 1
+  fi
+
+  action="$(parse_action "${1-}")"
+  if [[ "$action" == "help" ]]; then
+    print_usage
+    return 0
+  fi
+
+  if [[ -z "${1:-}" && -t 0 ]]; then
+    while true; do
+      read_main_menu_action action
+      if [[ "$action" == "exit" ]]; then
+        printf '%s\n' "$(color_text "$COLOR_DIM" "已退出。")"
+        return 0
+      fi
+      run_action "$action"
+      printf '\n%s\n' "$(color_text "$COLOR_DIM" "操作完成，已返回主菜单。")"
+    done
+  fi
+
+  run_action "$action"
 }
 
 main "$@"

@@ -109,6 +109,8 @@ bash one-click/deploy.sh
 9  退出
 ```
 
+不带参数启动时会停留在主菜单中；选择某个功能执行完成后会自动返回主菜单。带参数执行时，例如 `bash one-click/deploy.sh docker`，只执行该功能一次并退出。
+
 也可以直接指定功能：
 
 ```bash
