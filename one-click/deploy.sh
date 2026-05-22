@@ -328,11 +328,9 @@ read_line() {
 
   if [[ -t 0 ]]; then
     read -e -r -p "$prompt" input_value || die "无法读取输入，已退出。"
-  elif [[ -r /dev/tty ]]; then
-    read -e -r -p "$prompt" input_value </dev/tty || die "无法读取输入，已退出。"
   else
     printf '%s' "$prompt"
-    read -r input_value || die "无法读取交互输入，请下载脚本后执行。"
+    read -r input_value || die "检测到非交互输入，请下载脚本后执行。"
   fi
 
   input_value="${input_value%$'\r'}"
@@ -4166,6 +4164,13 @@ main() {
 
   init_ui
   banner
+
+  if [[ ! -t 0 ]]; then
+    printf '%s\n' "$(color_text "$COLOR_YELLOW" "检测到管道或非交互方式执行，交互式菜单无法稳定读取输入。")"
+    printf '%s\n' "请改用："
+    printf '%s\n' "curl -fsSL https://raw.githubusercontent.com/JunWan666/quick-docker-script-deploy/main/one-click/deploy.sh -o /tmp/deploy.sh && bash /tmp/deploy.sh"
+    return 1
+  fi
 
   action="$(parse_action "${1-}")"
   if [[ "$action" == "help" ]]; then
