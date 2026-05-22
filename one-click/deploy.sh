@@ -327,10 +327,12 @@ read_line() {
   fi
 
   if [[ -t 0 ]]; then
-    read -e -r -p "$prompt" input_value
+    read -e -r -p "$prompt" input_value || die "无法读取输入，已退出。"
+  elif [[ -r /dev/tty ]]; then
+    read -e -r -p "$prompt" input_value </dev/tty || die "无法读取输入，已退出。"
   else
     printf '%s' "$prompt"
-    read -r input_value
+    read -r input_value || die "无法读取交互输入，请下载脚本后执行。"
   fi
 
   input_value="${input_value%$'\r'}"
