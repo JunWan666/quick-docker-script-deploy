@@ -444,3 +444,7 @@ docker compose down -v --remove-orphans
 - 手动 DNS TXT 签发证书不绑定域名服务商，但不能无人值守自动续期；生产环境长期使用推荐 DNS API 模式。
 - 公网 HTTPS 推荐使用泛域名证书，New API、CPA、Sub2API、GPT Image WebUI 和 Gemini Image Desk 可以共用同一张证书。
 - 重新部署时脚本会重写 `default.conf` 和本次选择服务对应的 Nginx 配置；自定义站点建议单独放到其他 `.conf` 文件。
+
+## 7. 开源许可
+
+本项目基于 [MIT License](LICENSE) 开源。
