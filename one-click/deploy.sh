@@ -263,6 +263,7 @@ banner() {
     banner_line ' / __ |_/ /    / __ |/ ___// /    _\ \/ __/ _ `/ __/  '"'"'_/ '
     banner_line '/_/ |_/___/   /_/ |_/_/  /___/   /___/\__/\_,_/\__/_/\_\'
   fi
+  printf '%s\n' "$(color_text "$COLOR_DIM" "$(printf '%72s' '-- By JunWan --')")"
   printf '%s\n' "$(color_text "${COLOR_BOLD}${COLOR_GREEN}" "AI API Stack 一键部署脚本")"
   printf '%s\n' "$(color_text "$COLOR_DIM" "Nginx + New API + NewAPI v2 + CLIProxyAPI + Sub2API + GPT Image WebUI + Gemini Image Desk + PostgreSQL + Redis")"
   printf '%s\n' "$(color_text "$COLOR_DIM" "Docker / 证书 / 部署 / 更新 / Nginx 管理 / 镜像源 / 杂项 / 卸载")"
