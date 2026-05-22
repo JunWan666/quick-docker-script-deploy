@@ -121,6 +121,20 @@ GEMINI_IMAGE_DESK_BASE_URL_VALUE="https://generativelanguage.googleapis.com"
 GEMINI_IMAGE_DESK_DEFAULT_MODEL_VALUE="gemini-2.5-flash-image"
 GEMINI_IMAGE_DESK_PUBLIC_BASE_URL_CONFIG_VALUE="false"
 
+DUFS_IMAGE_VALUE="tannic666/dufs:latest"
+DUFS_PUBLISH_HOST_PORT_VALUE=false
+DUFS_HOST_PORT_VALUE="5000"
+DUFS_DATA_DIR_VALUE="${DEFAULT_STACK_DIR}/dufs/data"
+DUFS_ADMIN_USER_VALUE="admin"
+DUFS_ADMIN_PASSWORD_VALUE=""
+DUFS_ANONYMOUS_READ_VALUE=true
+DUFS_AUTH_VALUE=""
+DUFS_ALLOW_UPLOAD_VALUE=true
+DUFS_ALLOW_DELETE_VALUE=true
+DUFS_ALLOW_SEARCH_VALUE=true
+DUFS_ALLOW_ARCHIVE_VALUE=true
+DUFS_RENDER_TRY_INDEX_VALUE=true
+
 NGINX_IMAGE_VALUE="nginx:alpine"
 NGINX_DEPLOY_MODE_VALUE="lan"
 NGINX_ENABLE_HTTPS=false
@@ -134,13 +148,15 @@ NGINX_LAN_SUB2API_PORT_VALUE="8081"
 NGINX_LAN_WEBUI_PORT_VALUE="8082"
 NGINX_LAN_NEWAPI_V2_PORT_VALUE="8083"
 NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE="8084"
-NGINX_HTTP_SERVER_NAMES_VALUE="example.com www.example.com api.example.com admin.example.com sub.example.com image.example.com newapi.example.com gemini.example.com"
+NGINX_LAN_DUFS_PORT_VALUE="8085"
+NGINX_HTTP_SERVER_NAMES_VALUE="example.com www.example.com api.example.com admin.example.com sub.example.com image.example.com newapi.example.com gemini.example.com file.example.com"
 NGINX_API_SERVER_NAMES_VALUE="example.com www.example.com api.example.com"
 NGINX_ADMIN_SERVER_NAME_VALUE="admin.example.com"
 NGINX_SUB2API_SERVER_NAMES_VALUE="sub.example.com"
 NGINX_WEBUI_SERVER_NAMES_VALUE="image.example.com"
 NGINX_NEWAPI_V2_SERVER_NAMES_VALUE="newapi.example.com"
 NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE="gemini.example.com"
+NGINX_DUFS_SERVER_NAMES_VALUE="file.example.com"
 NGINX_API_CERT_VALUE="fullchain.cer"
 NGINX_API_KEY_VALUE="example.com.key"
 NGINX_ADMIN_CERT_VALUE="fullchain.cer"
@@ -153,12 +169,15 @@ NGINX_NEWAPI_V2_CERT_VALUE="fullchain.cer"
 NGINX_NEWAPI_V2_KEY_VALUE="example.com.key"
 NGINX_GEMINI_IMAGE_DESK_CERT_VALUE="fullchain.cer"
 NGINX_GEMINI_IMAGE_DESK_KEY_VALUE="example.com.key"
+NGINX_DUFS_CERT_VALUE="fullchain.cer"
+NGINX_DUFS_KEY_VALUE="example.com.key"
 NGINX_NEWAPI_UPSTREAM_VALUE="new-api:3000"
 NGINX_CLIPROXY_UPSTREAM_VALUE="cli-proxy-api:8317"
 NGINX_SUB2API_UPSTREAM_VALUE="sub2api:8080"
 NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE="gpt-image-2-webui:3000"
 NGINX_NEWAPI_V2_UPSTREAM_VALUE="newapi-v2:3000"
 NGINX_GEMINI_IMAGE_DESK_UPSTREAM_VALUE="gemini-image-desk:3000"
+NGINX_DUFS_UPSTREAM_VALUE="dufs:5000"
 
 die() {
   printf '错误：%s\n' "$*" >&2
@@ -265,7 +284,7 @@ banner() {
   fi
   printf '%s\n' "$(color_text "$COLOR_DIM" "$(printf '%72s' '-- By JunWan --')")"
   printf '%s\n' "$(color_text "${COLOR_BOLD}${COLOR_GREEN}" "AI API Stack 一键部署脚本")"
-  printf '%s\n' "$(color_text "$COLOR_DIM" "Nginx + New API + NewAPI v2 + CLIProxyAPI + Sub2API + GPT Image WebUI + Gemini Image Desk + PostgreSQL + Redis")"
+  printf '%s\n' "$(color_text "$COLOR_DIM" "Nginx + New API + NewAPI v2 + CLIProxyAPI + Sub2API + GPT Image WebUI + Gemini Image Desk + Dufs + PostgreSQL + Redis")"
   printf '%s\n' "$(color_text "$COLOR_DIM" "Docker / 证书 / 部署 / 更新 / Nginx 管理 / 镜像源 / 杂项 / 卸载")"
   rule "=" 72
 }
@@ -487,6 +506,12 @@ resolve_publish_ports() {
     ensure_available_port GEMINI_IMAGE_DESK_HOST_PORT_VALUE "Gemini Image Desk 直连" 3003 "$skip_port"
   fi
 
+  if needs_dufs_config && [[ "$DUFS_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+    skip_port=""
+    needs_gemini_image_desk_config && skip_port="$GEMINI_IMAGE_DESK_HOST_PORT_VALUE"
+    ensure_available_port DUFS_HOST_PORT_VALUE "Dufs 静态文件服务直连" 5000 "$skip_port"
+  fi
+
   if ! needs_nginx_config; then
     return
   fi
@@ -513,6 +538,11 @@ resolve_publish_ports() {
       skip_port=""
       needs_newapi_v2_config && skip_port="$NGINX_LAN_NEWAPI_V2_PORT_VALUE"
       ensure_available_port NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE "Nginx 局域网 Gemini Image Desk 入口" 18085 "$skip_port"
+    fi
+    if needs_dufs_config; then
+      skip_port=""
+      needs_gemini_image_desk_config && skip_port="$NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE"
+      ensure_available_port NGINX_LAN_DUFS_PORT_VALUE "Nginx 局域网 Dufs 静态文件入口" 18086 "$skip_port"
     fi
   else
     ensure_available_port NGINX_HTTP_PORT_VALUE "Nginx 公网 HTTP 入口" 18080
@@ -748,6 +778,20 @@ load_existing_env_defaults() {
   load_env_default "$env_file" "GEMINI_IMAGE_DESK_DEFAULT_MODEL" GEMINI_IMAGE_DESK_DEFAULT_MODEL_VALUE
   load_env_default "$env_file" "GEMINI_IMAGE_DESK_PUBLIC_BASE_URL_CONFIG" GEMINI_IMAGE_DESK_PUBLIC_BASE_URL_CONFIG_VALUE
 
+  load_env_default "$env_file" "DUFS_IMAGE" DUFS_IMAGE_VALUE
+  load_env_default "$env_file" "DUFS_PUBLISH_HOST_PORT" DUFS_PUBLISH_HOST_PORT_VALUE
+  load_env_default "$env_file" "DUFS_HOST_PORT" DUFS_HOST_PORT_VALUE
+  load_env_default "$env_file" "DUFS_DATA_DIR" DUFS_DATA_DIR_VALUE
+  load_env_default "$env_file" "DUFS_ADMIN_USER" DUFS_ADMIN_USER_VALUE
+  load_env_default "$env_file" "DUFS_ADMIN_PASSWORD" DUFS_ADMIN_PASSWORD_VALUE
+  load_env_default "$env_file" "DUFS_ANONYMOUS_READ" DUFS_ANONYMOUS_READ_VALUE
+  load_env_default "$env_file" "DUFS_AUTH" DUFS_AUTH_VALUE
+  load_env_default "$env_file" "DUFS_ALLOW_UPLOAD" DUFS_ALLOW_UPLOAD_VALUE
+  load_env_default "$env_file" "DUFS_ALLOW_DELETE" DUFS_ALLOW_DELETE_VALUE
+  load_env_default "$env_file" "DUFS_ALLOW_SEARCH" DUFS_ALLOW_SEARCH_VALUE
+  load_env_default "$env_file" "DUFS_ALLOW_ARCHIVE" DUFS_ALLOW_ARCHIVE_VALUE
+  load_env_default "$env_file" "DUFS_RENDER_TRY_INDEX" DUFS_RENDER_TRY_INDEX_VALUE
+
   load_env_default "$env_file" "NGINX_IMAGE" NGINX_IMAGE_VALUE
   load_env_default "$env_file" "NGINX_DEPLOY_MODE" NGINX_DEPLOY_MODE_VALUE
   load_env_default "$env_file" "NGINX_ENABLE_HTTPS" NGINX_ENABLE_HTTPS
@@ -761,6 +805,7 @@ load_existing_env_defaults() {
   load_env_default "$env_file" "NGINX_LAN_WEBUI_PORT" NGINX_LAN_WEBUI_PORT_VALUE
   load_env_default "$env_file" "NGINX_LAN_NEWAPI_V2_PORT" NGINX_LAN_NEWAPI_V2_PORT_VALUE
   load_env_default "$env_file" "NGINX_LAN_GEMINI_IMAGE_DESK_PORT" NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE
+  load_env_default "$env_file" "NGINX_LAN_DUFS_PORT" NGINX_LAN_DUFS_PORT_VALUE
   load_env_default "$env_file" "NGINX_HTTP_SERVER_NAMES" NGINX_HTTP_SERVER_NAMES_VALUE
   load_env_default "$env_file" "NGINX_API_SERVER_NAMES" NGINX_API_SERVER_NAMES_VALUE
   load_env_default "$env_file" "NGINX_ADMIN_SERVER_NAME" NGINX_ADMIN_SERVER_NAME_VALUE
@@ -768,6 +813,7 @@ load_existing_env_defaults() {
   load_env_default "$env_file" "NGINX_WEBUI_SERVER_NAMES" NGINX_WEBUI_SERVER_NAMES_VALUE
   load_env_default "$env_file" "NGINX_NEWAPI_V2_SERVER_NAMES" NGINX_NEWAPI_V2_SERVER_NAMES_VALUE
   load_env_default "$env_file" "NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES" NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE
+  load_env_default "$env_file" "NGINX_DUFS_SERVER_NAMES" NGINX_DUFS_SERVER_NAMES_VALUE
   load_env_default "$env_file" "NGINX_API_CERT" NGINX_API_CERT_VALUE
   load_env_default "$env_file" "NGINX_API_KEY" NGINX_API_KEY_VALUE
   load_env_default "$env_file" "NGINX_ADMIN_CERT" NGINX_ADMIN_CERT_VALUE
@@ -780,12 +826,15 @@ load_existing_env_defaults() {
   load_env_default "$env_file" "NGINX_NEWAPI_V2_KEY" NGINX_NEWAPI_V2_KEY_VALUE
   load_env_default "$env_file" "NGINX_GEMINI_IMAGE_DESK_CERT" NGINX_GEMINI_IMAGE_DESK_CERT_VALUE
   load_env_default "$env_file" "NGINX_GEMINI_IMAGE_DESK_KEY" NGINX_GEMINI_IMAGE_DESK_KEY_VALUE
+  load_env_default "$env_file" "NGINX_DUFS_CERT" NGINX_DUFS_CERT_VALUE
+  load_env_default "$env_file" "NGINX_DUFS_KEY" NGINX_DUFS_KEY_VALUE
   load_env_default "$env_file" "NGINX_NEWAPI_UPSTREAM" NGINX_NEWAPI_UPSTREAM_VALUE
   load_env_default "$env_file" "NGINX_CLIPROXY_UPSTREAM" NGINX_CLIPROXY_UPSTREAM_VALUE
   load_env_default "$env_file" "NGINX_SUB2API_UPSTREAM" NGINX_SUB2API_UPSTREAM_VALUE
   load_env_default "$env_file" "NGINX_GPT_IMAGE_WEBUI_UPSTREAM" NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE
   load_env_default "$env_file" "NGINX_NEWAPI_V2_UPSTREAM" NGINX_NEWAPI_V2_UPSTREAM_VALUE
   load_env_default "$env_file" "NGINX_GEMINI_IMAGE_DESK_UPSTREAM" NGINX_GEMINI_IMAGE_DESK_UPSTREAM_VALUE
+  load_env_default "$env_file" "NGINX_DUFS_UPSTREAM" NGINX_DUFS_UPSTREAM_VALUE
 }
 
 first_word() {
@@ -871,6 +920,9 @@ service_from_token() {
     6|gemini-image-desk|gemini-desk|gemini-image|gemini|image-desk)
       printf 'gemini-image-desk'
       ;;
+    7|dufs|static|static-file|static-files|static-host|file|files|assets)
+      printf 'dufs'
+      ;;
     *)
       return 1
       ;;
@@ -898,9 +950,10 @@ select_services() {
   menu_option "$COLOR_GREEN" " 4)" "gpt-image-2-webui"
   menu_option "$COLOR_GREEN" " 5)" "newapi-v2（tannic666/newapi，新版）"
   menu_option "$COLOR_GREEN" " 6)" "gemini-image-desk"
+  menu_option "$COLOR_GREEN" " 7)" "dufs（静态文件/图片/HTML 直链）"
   subtle_note "Nginx 默认作为统一网关必装，会按所选应用自动生成入口。"
   subtle_note "new-api、新版 NewAPI 和 sub2api 的 PostgreSQL / Redis 依赖会自动处理，不单独选择。"
-  subtle_note "输入 all、123456、1 2、1,5 或服务名都可以。"
+  subtle_note "输入 all、1234567、1 2、1,5 或服务名都可以。"
 
   while true; do
     read_line raw "要部署的服务" "all"
@@ -920,7 +973,7 @@ select_services() {
     saw_nginx_default="false"
 
     for token in $raw; do
-      if [[ "$token" =~ ^[1-6]+$ && "${#token}" -gt 1 ]]; then
+      if [[ "$token" =~ ^[1-7]+$ && "${#token}" -gt 1 ]]; then
         local index=0
         local char=""
         for ((index = 0; index < ${#token}; index++)); do
@@ -995,6 +1048,11 @@ needs_gemini_image_desk_config() {
   return 1
 }
 
+needs_dufs_config() {
+  selected_or_all "dufs" && return 0
+  return 1
+}
+
 needs_nginx_config() {
   return 0
 }
@@ -1012,6 +1070,7 @@ nginx_selected_service_names() {
   needs_gpt_image_webui_config && names+=("GPT Image WebUI")
   needs_newapi_v2_config && names+=("新版 NewAPI")
   needs_gemini_image_desk_config && names+=("Gemini Image Desk")
+  needs_dufs_config && names+=("Dufs 静态文件")
 
   join_list "${names[@]}"
 }
@@ -1025,6 +1084,7 @@ build_nginx_http_server_names() {
   needs_gpt_image_webui_config && names+=("$NGINX_WEBUI_SERVER_NAMES_VALUE")
   needs_newapi_v2_config && names+=("$NGINX_NEWAPI_V2_SERVER_NAMES_VALUE")
   needs_gemini_image_desk_config && names+=("$NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE")
+  needs_dufs_config && names+=("$NGINX_DUFS_SERVER_NAMES_VALUE")
 
   printf '%s' "${names[*]}"
 }
@@ -1103,6 +1163,8 @@ read_nginx_certificate_files() {
       NGINX_NEWAPI_V2_KEY_VALUE="$last_key"
       NGINX_GEMINI_IMAGE_DESK_CERT_VALUE="$last_cert"
       NGINX_GEMINI_IMAGE_DESK_KEY_VALUE="$last_key"
+      NGINX_DUFS_CERT_VALUE="$last_cert"
+      NGINX_DUFS_KEY_VALUE="$last_key"
       printf '已设置：所有 Nginx HTTPS 站点共用证书 %s / %s。\n' "$last_cert" "$last_key"
       return
     fi
@@ -1124,6 +1186,8 @@ read_nginx_certificate_files() {
     NGINX_NEWAPI_V2_KEY_VALUE="$NGINX_API_KEY_VALUE"
     NGINX_GEMINI_IMAGE_DESK_CERT_VALUE="$NGINX_API_CERT_VALUE"
     NGINX_GEMINI_IMAGE_DESK_KEY_VALUE="$NGINX_API_KEY_VALUE"
+    NGINX_DUFS_CERT_VALUE="$NGINX_API_CERT_VALUE"
+    NGINX_DUFS_KEY_VALUE="$NGINX_API_KEY_VALUE"
     printf '已设置：%s 共用证书 %s / %s。\n' "$(nginx_selected_service_names)" "$NGINX_API_CERT_VALUE" "$NGINX_API_KEY_VALUE"
     return
   fi
@@ -1152,6 +1216,10 @@ read_nginx_certificate_files() {
     read_line NGINX_GEMINI_IMAGE_DESK_CERT_VALUE "nginx/certs 里的 Gemini Image Desk 证书文件名" "$NGINX_GEMINI_IMAGE_DESK_CERT_VALUE"
     read_line NGINX_GEMINI_IMAGE_DESK_KEY_VALUE "nginx/certs 里的 Gemini Image Desk 私钥文件名" "$NGINX_GEMINI_IMAGE_DESK_KEY_VALUE"
   fi
+  if needs_dufs_config; then
+    read_line NGINX_DUFS_CERT_VALUE "nginx/certs 里的 Dufs 静态文件证书文件名" "$NGINX_DUFS_CERT_VALUE"
+    read_line NGINX_DUFS_KEY_VALUE "nginx/certs 里的 Dufs 静态文件私钥文件名" "$NGINX_DUFS_KEY_VALUE"
+  fi
 }
 
 uses_nginx_frontend() {
@@ -1164,6 +1232,15 @@ default_gpt_image_webui_base_url() {
   elif needs_newapi_v2_config; then
     printf 'http://newapi-v2:3000/v1'
   fi
+}
+
+build_dufs_auth_value() {
+  if [[ "$DUFS_ANONYMOUS_READ_VALUE" == "true" ]]; then
+    printf '%s:%s@/:rw|@/' "$DUFS_ADMIN_USER_VALUE" "$DUFS_ADMIN_PASSWORD_VALUE"
+    return
+  fi
+
+  printf '%s:%s@/:rw' "$DUFS_ADMIN_USER_VALUE" "$DUFS_ADMIN_PASSWORD_VALUE"
 }
 
 try_detect_compose() {
@@ -1667,6 +1744,9 @@ service_from_compose_token() {
     6|gemini-image-desk|gemini-desk|gemini-image|gemini|image-desk)
       printf 'gemini-image-desk'
       ;;
+    7|dufs|static|static-file|static-files|static-host|file|files|assets)
+      printf 'dufs'
+      ;;
     newapi-v2-postgres|newapi-v2-pg|newapi-v2-db)
       printf 'newapi-v2-postgres'
       ;;
@@ -1705,7 +1785,7 @@ select_compose_targets() {
   local service=""
 
   COMPOSE_TARGETS=()
-  subtle_note "输入 all 表示全部；也可以输入 123456、1 2、1,5、nginx、sub2api、webui、newapi-v2、gemini。"
+  subtle_note "输入 all 表示全部；也可以输入 1234567、1 2、1,5、nginx、sub2api、webui、newapi-v2、gemini、dufs。"
 
   while true; do
     read_line raw "请选择要操作的服务" "all"
@@ -1721,7 +1801,7 @@ select_compose_targets() {
 
     COMPOSE_TARGETS=()
     for token in $raw; do
-      if [[ "$token" =~ ^[1-6]+$ && "${#token}" -gt 1 ]]; then
+      if [[ "$token" =~ ^[1-7]+$ && "${#token}" -gt 1 ]]; then
         local index=0
         local char=""
         for ((index = 0; index < ${#token}; index++)); do
@@ -1763,12 +1843,16 @@ collect_answers() {
   SUB2API_ADMIN_PASSWORD_VALUE="$(random_hex 12)"
   SUB2API_JWT_SECRET_VALUE="$(random_hex 32)"
   SUB2API_TOTP_ENCRYPTION_KEY_VALUE="$(random_hex 32)"
+  DUFS_ADMIN_PASSWORD_VALUE="$(random_hex 12)"
 
   section_title "基础设置"
   use_fixed_stack_dir
   show_stack_dir_notice
   ensure_stack_dir_writable
   load_existing_env_defaults
+  if [[ "$DUFS_IMAGE_VALUE" == "sigoden/dufs:latest" ]]; then
+    DUFS_IMAGE_VALUE="tannic666/dufs:latest"
+  fi
   read_line PROJECT_NAME_VALUE "Compose 项目名" "$PROJECT_NAME_VALUE"
   read_line TZ_VALUE "时区" "$TZ_VALUE"
   read_yes_no ADVANCED_CONFIG_VALUE "是否启用高级配置（自定义镜像、端口、上游地址时使用）" "$ADVANCED_CONFIG_VALUE"
@@ -2055,6 +2139,53 @@ collect_answers() {
     fi
   fi
 
+  if needs_dufs_config; then
+    [[ -n "$DUFS_ADMIN_PASSWORD_VALUE" ]] || DUFS_ADMIN_PASSWORD_VALUE="$(random_hex 12)"
+    if [[ -z "$DUFS_DATA_DIR_VALUE" || "$DUFS_DATA_DIR_VALUE" == "${DEFAULT_STACK_DIR}/dufs/data" ]]; then
+      DUFS_DATA_DIR_VALUE="$STACK_DIR/dufs/data"
+    fi
+
+    if [[ "$ADVANCED_CONFIG_VALUE" == "true" ]]; then
+      section_title "Dufs 静态文件配置"
+      read_line DUFS_IMAGE_VALUE "Dufs 镜像" "$DUFS_IMAGE_VALUE"
+      read_line DUFS_DATA_DIR_VALUE "宿主机静态文件目录" "$DUFS_DATA_DIR_VALUE"
+      DUFS_DATA_DIR_VALUE="$(expand_path "$DUFS_DATA_DIR_VALUE")"
+      read_line DUFS_ADMIN_USER_VALUE "Dufs 管理员用户名" "$DUFS_ADMIN_USER_VALUE"
+      read_line DUFS_ADMIN_PASSWORD_VALUE "Dufs 管理员密码（明文，建议只用字母数字）" "$DUFS_ADMIN_PASSWORD_VALUE"
+      read_yes_no DUFS_ANONYMOUS_READ_VALUE "是否允许匿名只读访问直链文件" "$DUFS_ANONYMOUS_READ_VALUE"
+      read_yes_no DUFS_ALLOW_UPLOAD_VALUE "是否允许管理员上传文件" "$DUFS_ALLOW_UPLOAD_VALUE"
+      read_yes_no DUFS_ALLOW_DELETE_VALUE "是否允许管理员删除文件" "$DUFS_ALLOW_DELETE_VALUE"
+      read_yes_no DUFS_ALLOW_SEARCH_VALUE "是否启用搜索" "$DUFS_ALLOW_SEARCH_VALUE"
+      read_yes_no DUFS_ALLOW_ARCHIVE_VALUE "是否启用目录打包下载" "$DUFS_ALLOW_ARCHIVE_VALUE"
+      read_yes_no DUFS_RENDER_TRY_INDEX_VALUE "目录存在 index.html 时是否优先渲染页面" "$DUFS_RENDER_TRY_INDEX_VALUE"
+      if uses_nginx_frontend; then
+        DUFS_PUBLISH_HOST_PORT_VALUE=false
+        printf '默认启用 Nginx，Dufs 默认不映射宿主机端口，只通过 Nginx 访问。\n'
+      else
+        read_yes_no DUFS_PUBLISH_HOST_PORT_VALUE "是否开放 Dufs 直连端口" "$DUFS_PUBLISH_HOST_PORT_VALUE"
+      fi
+      if [[ "$DUFS_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+        read_line DUFS_HOST_PORT_VALUE "Dufs 主机端口" "$DUFS_HOST_PORT_VALUE"
+      fi
+    else
+      DUFS_IMAGE_VALUE="tannic666/dufs:latest"
+      DUFS_DATA_DIR_VALUE="$(expand_path "$DUFS_DATA_DIR_VALUE")"
+      [[ -n "$DUFS_ADMIN_USER_VALUE" ]] || DUFS_ADMIN_USER_VALUE="admin"
+      DUFS_ANONYMOUS_READ_VALUE=true
+      DUFS_ALLOW_UPLOAD_VALUE=true
+      DUFS_ALLOW_DELETE_VALUE=true
+      DUFS_ALLOW_SEARCH_VALUE=true
+      DUFS_ALLOW_ARCHIVE_VALUE=true
+      DUFS_RENDER_TRY_INDEX_VALUE=true
+      DUFS_PUBLISH_HOST_PORT_VALUE=false
+      printf '默认启用 Dufs：匿名可读直链，管理员登录后可上传/删除，静态目录为 %s。\n' "$DUFS_DATA_DIR_VALUE"
+    fi
+
+    [[ -n "$DUFS_ADMIN_USER_VALUE" ]] || DUFS_ADMIN_USER_VALUE="admin"
+    [[ -n "$DUFS_ADMIN_PASSWORD_VALUE" ]] || DUFS_ADMIN_PASSWORD_VALUE="$(random_hex 12)"
+    DUFS_AUTH_VALUE="$(build_dufs_auth_value)"
+  fi
+
   if needs_nginx_config; then
     section_title "Nginx 配置"
     if [[ "$ADVANCED_CONFIG_VALUE" == "true" ]]; then
@@ -2081,6 +2212,9 @@ collect_answers() {
         if needs_gemini_image_desk_config; then
           read_line NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE "局域网 Gemini Image Desk 入口主机端口" "$NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE"
         fi
+        if needs_dufs_config; then
+          read_line NGINX_LAN_DUFS_PORT_VALUE "局域网 Dufs 静态文件入口主机端口" "$NGINX_LAN_DUFS_PORT_VALUE"
+        fi
       else
         read_yes_no https_enabled "是否启用 Nginx HTTPS 配置" "$NGINX_ENABLE_HTTPS"
         NGINX_ENABLE_HTTPS="$https_enabled"
@@ -2099,6 +2233,7 @@ collect_answers() {
         needs_gpt_image_webui_config && read_line NGINX_WEBUI_SERVER_NAMES_VALUE "GPT Image WebUI 绑定域名（多个空格分隔）" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
         needs_newapi_v2_config && read_line NGINX_NEWAPI_V2_SERVER_NAMES_VALUE "新版 NewAPI 绑定域名（多个空格分隔）" "$NGINX_NEWAPI_V2_SERVER_NAMES_VALUE"
         needs_gemini_image_desk_config && read_line NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE "Gemini Image Desk 绑定域名（多个空格分隔）" "$NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE"
+        needs_dufs_config && read_line NGINX_DUFS_SERVER_NAMES_VALUE "Dufs 静态文件绑定域名（多个空格分隔）" "$NGINX_DUFS_SERVER_NAMES_VALUE"
         NGINX_HTTP_SERVER_NAMES_VALUE="$(build_nginx_http_server_names)"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           read_nginx_certificate_files
@@ -2109,6 +2244,7 @@ collect_answers() {
         needs_gpt_image_webui_config && read_line NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE "GPT Image WebUI 上游地址" "$NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE"
         needs_newapi_v2_config && read_line NGINX_NEWAPI_V2_UPSTREAM_VALUE "新版 NewAPI 上游地址" "$NGINX_NEWAPI_V2_UPSTREAM_VALUE"
         needs_gemini_image_desk_config && read_line NGINX_GEMINI_IMAGE_DESK_UPSTREAM_VALUE "Gemini Image Desk 上游地址" "$NGINX_GEMINI_IMAGE_DESK_UPSTREAM_VALUE"
+        needs_dufs_config && read_line NGINX_DUFS_UPSTREAM_VALUE "Dufs 静态文件上游地址" "$NGINX_DUFS_UPSTREAM_VALUE"
         printf '已绑定所选 Nginx 站点：%s。\n' "$(nginx_selected_service_names)"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           if [[ "$NGINX_HTTP_TO_HTTPS_REDIRECT_VALUE" == "true" ]]; then
@@ -2140,6 +2276,7 @@ collect_answers() {
         needs_gpt_image_webui_config && read_line NGINX_WEBUI_SERVER_NAMES_VALUE "GPT Image WebUI 绑定域名（多个空格分隔）" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
         needs_newapi_v2_config && read_line NGINX_NEWAPI_V2_SERVER_NAMES_VALUE "新版 NewAPI 绑定域名（多个空格分隔）" "$NGINX_NEWAPI_V2_SERVER_NAMES_VALUE"
         needs_gemini_image_desk_config && read_line NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE "Gemini Image Desk 绑定域名（多个空格分隔）" "$NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE"
+        needs_dufs_config && read_line NGINX_DUFS_SERVER_NAMES_VALUE "Dufs 静态文件绑定域名（多个空格分隔）" "$NGINX_DUFS_SERVER_NAMES_VALUE"
         NGINX_HTTP_SERVER_NAMES_VALUE="$(build_nginx_http_server_names)"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
           read_nginx_certificate_files
@@ -2151,6 +2288,7 @@ collect_answers() {
       NGINX_GPT_IMAGE_WEBUI_UPSTREAM_VALUE="gpt-image-2-webui:3000"
       NGINX_NEWAPI_V2_UPSTREAM_VALUE="newapi-v2:3000"
       NGINX_GEMINI_IMAGE_DESK_UPSTREAM_VALUE="gemini-image-desk:3000"
+      NGINX_DUFS_UPSTREAM_VALUE="dufs:5000"
       if [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" ]]; then
         printf '已绑定所选 Nginx 站点：%s。\n' "$(nginx_selected_service_names)"
         if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
@@ -2218,6 +2356,12 @@ prepare_directories() {
 
   if needs_gemini_image_desk_config; then
     mkdir -p "$STACK_DIR/gemini-image-desk"
+  fi
+
+  if needs_dufs_config; then
+    mkdir -p "$STACK_DIR/dufs"
+    mkdir -p "$DUFS_DATA_DIR_VALUE"
+    chmod -R a+rwX "$DUFS_DATA_DIR_VALUE" 2>/dev/null || true
   fi
 }
 
@@ -2330,6 +2474,22 @@ write_env_file() {
       write_env_line "GEMINI_IMAGE_DESK_PUBLIC_BASE_URL_CONFIG" "$GEMINI_IMAGE_DESK_PUBLIC_BASE_URL_CONFIG_VALUE"
     fi
 
+    if needs_dufs_config; then
+      write_env_line "DUFS_IMAGE" "$DUFS_IMAGE_VALUE"
+      write_env_line "DUFS_PUBLISH_HOST_PORT" "$DUFS_PUBLISH_HOST_PORT_VALUE"
+      write_env_line "DUFS_HOST_PORT" "$DUFS_HOST_PORT_VALUE"
+      write_env_line "DUFS_DATA_DIR" "$DUFS_DATA_DIR_VALUE"
+      write_env_line "DUFS_ADMIN_USER" "$DUFS_ADMIN_USER_VALUE"
+      write_env_line "DUFS_ADMIN_PASSWORD" "$DUFS_ADMIN_PASSWORD_VALUE"
+      write_env_line "DUFS_ANONYMOUS_READ" "$DUFS_ANONYMOUS_READ_VALUE"
+      write_env_line "DUFS_AUTH" "$DUFS_AUTH_VALUE"
+      write_env_line "DUFS_ALLOW_UPLOAD" "$DUFS_ALLOW_UPLOAD_VALUE"
+      write_env_line "DUFS_ALLOW_DELETE" "$DUFS_ALLOW_DELETE_VALUE"
+      write_env_line "DUFS_ALLOW_SEARCH" "$DUFS_ALLOW_SEARCH_VALUE"
+      write_env_line "DUFS_ALLOW_ARCHIVE" "$DUFS_ALLOW_ARCHIVE_VALUE"
+      write_env_line "DUFS_RENDER_TRY_INDEX" "$DUFS_RENDER_TRY_INDEX_VALUE"
+    fi
+
     write_env_line "NGINX_IMAGE" "$NGINX_IMAGE_VALUE"
     write_env_line "NGINX_DEPLOY_MODE" "$NGINX_DEPLOY_MODE_VALUE"
     write_env_line "NGINX_ENABLE_HTTPS" "$NGINX_ENABLE_HTTPS"
@@ -2385,6 +2545,14 @@ write_env_file() {
       write_env_line "NGINX_GEMINI_IMAGE_DESK_CERT" "$NGINX_GEMINI_IMAGE_DESK_CERT_VALUE"
       write_env_line "NGINX_GEMINI_IMAGE_DESK_KEY" "$NGINX_GEMINI_IMAGE_DESK_KEY_VALUE"
       write_env_line "NGINX_GEMINI_IMAGE_DESK_UPSTREAM" "$NGINX_GEMINI_IMAGE_DESK_UPSTREAM_VALUE"
+    fi
+
+    if needs_dufs_config; then
+      write_env_line "NGINX_LAN_DUFS_PORT" "$NGINX_LAN_DUFS_PORT_VALUE"
+      write_env_line "NGINX_DUFS_SERVER_NAMES" "$NGINX_DUFS_SERVER_NAMES_VALUE"
+      write_env_line "NGINX_DUFS_CERT" "$NGINX_DUFS_CERT_VALUE"
+      write_env_line "NGINX_DUFS_KEY" "$NGINX_DUFS_KEY_VALUE"
+      write_env_line "NGINX_DUFS_UPSTREAM" "$NGINX_DUFS_UPSTREAM_VALUE"
     fi
   } > "$env_file"
 }
@@ -2511,6 +2679,9 @@ nginx_service_conf_file() {
     gemini-image-desk)
       printf '%s/nginx/conf.d/gemini-desk.conf' "$STACK_DIR"
       ;;
+    dufs)
+      printf '%s/nginx/conf.d/dufs.conf' "$STACK_DIR"
+      ;;
     *)
       die "Unknown Nginx service: $service"
       ;;
@@ -2624,6 +2795,10 @@ write_nginx_conf() {
   if needs_gemini_image_desk_config; then
     write_nginx_service_conf "$(nginx_service_conf_file "gemini-image-desk")" "Gemini Image Desk" "$NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE" "$NGINX_GEMINI_IMAGE_DESK_UPSTREAM_VALUE" "$NGINX_GEMINI_IMAGE_DESK_CERT_VALUE" "$NGINX_GEMINI_IMAGE_DESK_KEY_VALUE" "600s" "" "8084"
   fi
+
+  if needs_dufs_config; then
+    write_nginx_service_conf "$(nginx_service_conf_file "dufs")" "Dufs Static Files" "$NGINX_DUFS_SERVER_NAMES_VALUE" "$NGINX_DUFS_UPSTREAM_VALUE" "$NGINX_DUFS_CERT_VALUE" "$NGINX_DUFS_KEY_VALUE" "600s" "" "8085"
+  fi
 }
 
 validate_nginx_certificates() {
@@ -2642,6 +2817,7 @@ validate_nginx_certificates() {
     needs_gpt_image_webui_config && certs+=("$NGINX_WEBUI_CERT_VALUE" "$NGINX_WEBUI_KEY_VALUE")
     needs_newapi_v2_config && certs+=("$NGINX_NEWAPI_V2_CERT_VALUE" "$NGINX_NEWAPI_V2_KEY_VALUE")
     needs_gemini_image_desk_config && certs+=("$NGINX_GEMINI_IMAGE_DESK_CERT_VALUE" "$NGINX_GEMINI_IMAGE_DESK_KEY_VALUE")
+    needs_dufs_config && certs+=("$NGINX_DUFS_CERT_VALUE" "$NGINX_DUFS_KEY_VALUE")
   fi
 
   for file in "${certs[@]}"; do
@@ -3038,6 +3214,40 @@ YAML
 YAML
   fi
 
+  if [[ "$include_services" == "true" ]] && needs_dufs_config; then
+    cat >> "$compose_file" <<'YAML'
+  dufs:
+    image: "${DUFS_IMAGE:-tannic666/dufs:latest}"
+    restart: unless-stopped
+    environment:
+      TZ: "${TZ:-Asia/Shanghai}"
+      DUFS_SERVE_PATH: "/data"
+      DUFS_BIND: "0.0.0.0"
+      DUFS_PORT: "5000"
+      DUFS_AUTH: "${DUFS_AUTH:-admin:change-me@/:rw|@/}"
+      DUFS_ALLOW_UPLOAD: "${DUFS_ALLOW_UPLOAD:-true}"
+      DUFS_ALLOW_DELETE: "${DUFS_ALLOW_DELETE:-true}"
+      DUFS_ALLOW_SEARCH: "${DUFS_ALLOW_SEARCH:-true}"
+      DUFS_ALLOW_ARCHIVE: "${DUFS_ALLOW_ARCHIVE:-true}"
+      DUFS_RENDER_TRY_INDEX: "${DUFS_RENDER_TRY_INDEX:-true}"
+YAML
+
+    if [[ "$DUFS_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+      cat >> "$compose_file" <<'YAML'
+    ports:
+      - "${DUFS_HOST_PORT:-5000}:5000"
+YAML
+    fi
+
+    cat >> "$compose_file" <<'YAML'
+    volumes:
+      - ${DUFS_DATA_DIR:-/opt/ai-api-stack/dufs/data}:/data
+    networks:
+      - public-net
+
+YAML
+  fi
+
   if [[ "$include_nginx" == "true" ]]; then
     cat >> "$compose_file" <<'YAML'
   nginx:
@@ -3075,6 +3285,11 @@ YAML
     if needs_gemini_image_desk_config; then
       cat >> "$compose_file" <<'YAML'
       - "${NGINX_LAN_GEMINI_IMAGE_DESK_PORT:-8084}:8084"
+YAML
+    fi
+    if needs_dufs_config; then
+      cat >> "$compose_file" <<'YAML'
+      - "${NGINX_LAN_DUFS_PORT:-8085}:8085"
 YAML
     fi
   else
@@ -3121,6 +3336,9 @@ YAML
 YAML
     needs_gemini_image_desk_config && cat >> "$compose_file" <<'YAML'
       - gemini-image-desk
+YAML
+    needs_dufs_config && cat >> "$compose_file" <<'YAML'
+      - dufs
 YAML
   fi
 
@@ -3218,6 +3436,7 @@ write_service_compose_files() {
   local include_sub2api="false"
   local include_webui="false"
   local include_gemini_desk="false"
+  local include_dufs="false"
 
   needs_newapi_config && include_newapi="true"
   needs_newapi_v2_config && include_newapi_v2="true"
@@ -3225,6 +3444,7 @@ write_service_compose_files() {
   needs_sub2api_config && include_sub2api="true"
   needs_gpt_image_webui_config && include_webui="true"
   needs_gemini_image_desk_config && include_gemini_desk="true"
+  needs_dufs_config && include_dufs="true"
 
   [[ "$include_newapi" == "true" ]] && write_service_compose_for "$STACK_DIR/new-api/docker-compose.yml" "new-api"
   [[ "$include_newapi_v2" == "true" ]] && write_service_compose_for "$STACK_DIR/newapi-v2/docker-compose.yml" "newapi-v2"
@@ -3232,6 +3452,7 @@ write_service_compose_files() {
   [[ "$include_sub2api" == "true" ]] && write_service_compose_for "$STACK_DIR/sub2api/docker-compose.yml" "sub2api"
   [[ "$include_webui" == "true" ]] && write_service_compose_for "$STACK_DIR/gpt-image-2-webui/docker-compose.yml" "gpt-image-2-webui"
   [[ "$include_gemini_desk" == "true" ]] && write_service_compose_for "$STACK_DIR/gemini-image-desk/docker-compose.yml" "gemini-image-desk"
+  [[ "$include_dufs" == "true" ]] && write_service_compose_for "$STACK_DIR/dufs/docker-compose.yml" "dufs"
 
   write_compose_file "$STACK_DIR/nginx/docker-compose.yml" "true" "false" "false"
 }
@@ -3310,12 +3531,14 @@ print_summary() {
   local webui_primary=""
   local newapi_v2_primary=""
   local gemini_desk_primary=""
+  local dufs_primary=""
   local newapi_url=""
   local cliproxy_url=""
   local sub2api_url=""
   local webui_url=""
   local newapi_v2_url=""
   local gemini_desk_url=""
+  local dufs_url=""
 
   lan_ip="$(detect_lan_ip)"
   api_primary="$(first_word "$NGINX_API_SERVER_NAMES_VALUE")"
@@ -3324,6 +3547,7 @@ print_summary() {
   webui_primary="$(first_word "$NGINX_WEBUI_SERVER_NAMES_VALUE")"
   newapi_v2_primary="$(first_word "$NGINX_NEWAPI_V2_SERVER_NAMES_VALUE")"
   gemini_desk_primary="$(first_word "$NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE")"
+  dufs_primary="$(first_word "$NGINX_DUFS_SERVER_NAMES_VALUE")"
 
   if needs_nginx_config; then
     if [[ "$NGINX_DEPLOY_MODE_VALUE" == "lan" ]]; then
@@ -3334,6 +3558,7 @@ print_summary() {
         webui_url="http://${lan_ip}:${NGINX_LAN_WEBUI_PORT_VALUE}"
         newapi_v2_url="http://${lan_ip}:${NGINX_LAN_NEWAPI_V2_PORT_VALUE}"
         gemini_desk_url="http://${lan_ip}:${NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE}"
+        dufs_url="http://${lan_ip}:${NGINX_LAN_DUFS_PORT_VALUE}"
       else
         newapi_url="http://服务器IP:${NGINX_LAN_API_PORT_VALUE}"
         cliproxy_url="http://服务器IP:${NGINX_LAN_ADMIN_PORT_VALUE}"
@@ -3341,6 +3566,7 @@ print_summary() {
         webui_url="http://服务器IP:${NGINX_LAN_WEBUI_PORT_VALUE}"
         newapi_v2_url="http://服务器IP:${NGINX_LAN_NEWAPI_V2_PORT_VALUE}"
         gemini_desk_url="http://服务器IP:${NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE}"
+        dufs_url="http://服务器IP:${NGINX_LAN_DUFS_PORT_VALUE}"
       fi
     elif [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
       newapi_url="$(url_with_port https "$api_primary" "$NGINX_HTTPS_PORT_VALUE")"
@@ -3349,6 +3575,7 @@ print_summary() {
       webui_url="$(url_with_port https "$webui_primary" "$NGINX_HTTPS_PORT_VALUE")"
       newapi_v2_url="$(url_with_port https "$newapi_v2_primary" "$NGINX_HTTPS_PORT_VALUE")"
       gemini_desk_url="$(url_with_port https "$gemini_desk_primary" "$NGINX_HTTPS_PORT_VALUE")"
+      dufs_url="$(url_with_port https "$dufs_primary" "$NGINX_HTTPS_PORT_VALUE")"
     else
       newapi_url="$(url_with_port http "$api_primary" "$NGINX_HTTP_PORT_VALUE")"
       cliproxy_url="$(url_with_port http "$admin_primary" "$NGINX_HTTP_PORT_VALUE")"
@@ -3356,6 +3583,7 @@ print_summary() {
       webui_url="$(url_with_port http "$webui_primary" "$NGINX_HTTP_PORT_VALUE")"
       newapi_v2_url="$(url_with_port http "$newapi_v2_primary" "$NGINX_HTTP_PORT_VALUE")"
       gemini_desk_url="$(url_with_port http "$gemini_desk_primary" "$NGINX_HTTP_PORT_VALUE")"
+      dufs_url="$(url_with_port http "$dufs_primary" "$NGINX_HTTP_PORT_VALUE")"
     fi
   else
     newapi_url="http://服务器IP:${NEWAPI_HOST_PORT_VALUE}"
@@ -3364,6 +3592,7 @@ print_summary() {
     webui_url="http://服务器IP:${GPT_IMAGE_WEBUI_HOST_PORT_VALUE}"
     newapi_v2_url="http://服务器IP:${NEWAPI_V2_HOST_PORT_VALUE}"
     gemini_desk_url="http://服务器IP:${GEMINI_IMAGE_DESK_HOST_PORT_VALUE}"
+    dufs_url="http://服务器IP:${DUFS_HOST_PORT_VALUE}"
   fi
 
   section_title "部署完成"
@@ -3382,6 +3611,7 @@ print_summary() {
       needs_gpt_image_webui_config && field_line "GPT Image WebUI 入口端口：" "$NGINX_LAN_WEBUI_PORT_VALUE"
       needs_newapi_v2_config && field_line "新版 NewAPI 入口端口：" "$NGINX_LAN_NEWAPI_V2_PORT_VALUE"
       needs_gemini_image_desk_config && field_line "Gemini Image Desk 入口端口：" "$NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE"
+      needs_dufs_config && field_line "Dufs 静态文件入口端口：" "$NGINX_LAN_DUFS_PORT_VALUE"
     else
       field_line "Nginx 模式：" "公网，按域名转发。"
       needs_newapi_config && field_line "New API 绑定域名：" "$NGINX_API_SERVER_NAMES_VALUE"
@@ -3390,6 +3620,7 @@ print_summary() {
       needs_gpt_image_webui_config && field_line "GPT Image WebUI 绑定域名：" "$NGINX_WEBUI_SERVER_NAMES_VALUE"
       needs_newapi_v2_config && field_line "新版 NewAPI 绑定域名：" "$NGINX_NEWAPI_V2_SERVER_NAMES_VALUE"
       needs_gemini_image_desk_config && field_line "Gemini Image Desk 绑定域名：" "$NGINX_GEMINI_IMAGE_DESK_SERVER_NAMES_VALUE"
+      needs_dufs_config && field_line "Dufs 静态文件绑定域名：" "$NGINX_DUFS_SERVER_NAMES_VALUE"
       field_line "公网 HTTP 端口：" "$NGINX_HTTP_PORT_VALUE"
       if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
         field_line "公网 HTTPS 端口：" "$NGINX_HTTPS_PORT_VALUE"
@@ -3528,6 +3759,27 @@ print_summary() {
     subtle_note "Gemini Image Desk 的 API Key 默认由用户在页面填写并保存在浏览器本地。"
   fi
 
+  if needs_dufs_config; then
+    section_title "Dufs 静态文件信息"
+    field_line "访问地址：" "$dufs_url"
+    field_line "静态文件目录：" "$DUFS_DATA_DIR_VALUE"
+    field_line "管理员用户名：" "$DUFS_ADMIN_USER_VALUE"
+    field_line "管理员密码：" "$DUFS_ADMIN_PASSWORD_VALUE"
+    if needs_nginx_config && [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" && "$NGINX_DUFS_SERVER_NAMES_VALUE" != "" ]]; then
+      field_line "绑定域名：" "$NGINX_DUFS_SERVER_NAMES_VALUE"
+    fi
+    if [[ "$DUFS_ANONYMOUS_READ_VALUE" == "true" ]]; then
+      subtle_note "匿名用户可直接访问文件；管理员登录后可上传和管理文件。"
+    else
+      subtle_note "已关闭匿名只读访问，访问文件需要登录。"
+    fi
+    if [[ "$DUFS_PUBLISH_HOST_PORT_VALUE" != "true" ]]; then
+      subtle_note "Dufs 未映射宿主机直连端口，只通过 Nginx / Docker 网络访问。"
+    else
+      field_line "直连端口：" "$DUFS_HOST_PORT_VALUE"
+    fi
+  fi
+
   if [[ "$NGINX_DEPLOY_MODE_VALUE" != "lan" && "$NGINX_ENABLE_HTTPS" == "true" ]]; then
     section_title "证书信息"
     field_line "证书目录：" "$STACK_DIR/nginx/certs"
@@ -3549,6 +3801,8 @@ print_summary() {
       needs_newapi_v2_config && field_line "新版 NewAPI 私钥：" "$NGINX_NEWAPI_V2_KEY_VALUE"
       needs_gemini_image_desk_config && field_line "Gemini Image Desk 证书：" "$NGINX_GEMINI_IMAGE_DESK_CERT_VALUE"
       needs_gemini_image_desk_config && field_line "Gemini Image Desk 私钥：" "$NGINX_GEMINI_IMAGE_DESK_KEY_VALUE"
+      needs_dufs_config && field_line "Dufs 静态文件证书：" "$NGINX_DUFS_CERT_VALUE"
+      needs_dufs_config && field_line "Dufs 静态文件私钥：" "$NGINX_DUFS_KEY_VALUE"
     fi
   fi
 }

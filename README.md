@@ -3,7 +3,7 @@
     <img src="docs/banner.png" alt="AI API Stack 一键部署脚本" width="100%" />
   </p>
   <h1>AI API Stack 一键部署脚本</h1>
-  <p><strong>Docker / nginx / new-api / newapi-v2 / cli-proxy-api / sub2api / gpt-image-2-webui / gemini-image-desk / PostgreSQL / Redis</strong></p>
+  <p><strong>Docker / nginx / new-api / newapi-v2 / cli-proxy-api / sub2api / gpt-image-2-webui / gemini-image-desk / dufs / PostgreSQL / Redis</strong></p>
   <p>一个交互式 Shell 脚本，从 Docker 环境准备到服务部署、证书、更新和 Nginx 运维都集中到一个入口。</p>
   <p>
     <img src="https://img.shields.io/badge/Linux-Docker-333333?style=for-the-badge&logo=linux&logoColor=white" alt="Linux Docker" />
@@ -23,7 +23,7 @@
 
 ## 1. 脚本说明
 
-`one-click/deploy.sh` 是一个面向 Docker Compose 的一键部署和运维脚本，主要用于部署 `nginx`、旧版 `new-api`、新版 `newapi-v2`、`cli-proxy-api`、`sub2api`、`gpt-image-2-webui` 和 `gemini-image-desk`。
+`one-click/deploy.sh` 是一个面向 Docker Compose 的一键部署和运维脚本，主要用于部署 `nginx`、旧版 `new-api`、新版 `newapi-v2`、`cli-proxy-api`、`sub2api`、`gpt-image-2-webui`、`gemini-image-desk` 和 `dufs` 静态文件服务。
 
 - Linux 通用安装/检查 Docker，优先使用 Docker 官方软件源，必要时可回退到官方 `get.docker.com` 便捷脚本
 - 固定使用 `/opt/ai-api-stack/` 作为安装和运维目录
@@ -34,7 +34,8 @@
 - `sub2api` 自动带独立 PostgreSQL 和 Redis
 - 支持部署 `gpt-image-2-webui`，默认可通过 Docker 内网连接 New API
 - 支持部署 `gemini-image-desk`，镜像为 `tannic666/gemini-image-desk:latest`
-- Sub2API、GPT Image WebUI、Gemini Image Desk 等应用容器默认加入同一个 `public-net`，外部网络名默认是 `app-net`
+- 支持部署 `dufs`，用于图片、HTML、压缩包等静态资源直链和浏览器上传
+- Sub2API、GPT Image WebUI、Gemini Image Desk、Dufs 等应用容器默认加入同一个 `public-net`，外部网络名默认是 `app-net`
 - 支持局域网部署和公网域名部署
 - 支持公网 HTTPS、80 跳转 443、共用证书
 - 支持 acme.sh + 阿里云 DNS API 或手动 DNS TXT 签发泛域名证书，并在后续 HTTPS 配置中自动复用上次证书文件名
@@ -204,10 +205,10 @@ bash one-click/deploy.sh deploy
 all
 1
 2
-123456
+1234567
 1 2
 1,5
-new-api sub2api webui newapi-v2 gemini
+new-api sub2api webui newapi-v2 gemini dufs
 ```
 
 服务编号含义：
@@ -220,6 +221,7 @@ Nginx 默认作为统一网关必装，不需要选择。
 4 = gpt-image-2-webui
 5 = newapi-v2，新版 NewAPI，镜像 tannic666/newapi，自动带独立 PostgreSQL + Redis
 6 = gemini-image-desk，镜像 tannic666/gemini-image-desk
+7 = dufs，静态文件/图片/HTML 直链服务，镜像 tannic666/dufs
 ```
 
 常用选择：
@@ -231,12 +233,14 @@ Nginx 默认作为统一网关必装，不需要选择。
 - `4`：只部署 GPT Image WebUI，并生成对应 Nginx 入口
 - `5`：只部署新版 NewAPI，并生成对应 Nginx 入口
 - `6`：只部署 Gemini Image Desk，并生成对应 Nginx 入口
+- `7`：只部署 Dufs 静态文件服务，并生成对应 Nginx 入口
 - `12`：部署 New API + CPA
 - `13`：部署 New API + Sub2API
 - `124`：部署 New API + CPA + GPT Image WebUI
 - `15`：同时部署旧版 New API + 新版 NewAPI
 - `56`：部署新版 NewAPI + Gemini Image Desk
-- `123456`：部署全部服务
+- 域名建议：通用静态资源优先用 `file.774966.xyz`；如果要按用途拆分，也可以让 `img.774966.xyz page.774966.xyz` 和 `file.774966.xyz` 指向同一 Dufs 目录
+- `1234567`：部署全部服务
 
 ### 4.4 局域网部署
 
@@ -274,6 +278,7 @@ Nginx 部署模式: 2
 - CPA 绑定域名，例如 `admin.774966.xyz`
 - Sub2API 绑定域名，例如 `sub.774966.xyz`
 - GPT Image WebUI 绑定域名，例如 `image.774966.xyz`
+- Dufs 静态文件绑定域名，例如 `file.774966.xyz`；也可以填写 `file.774966.xyz img.774966.xyz page.774966.xyz`
 - 是否共用同一张证书
 - 证书文件名和私钥文件名
 
@@ -417,6 +422,9 @@ docker compose down -v --remove-orphans
 │   └── logs/
 ├── gemini-image-desk/          # 选择 6 时生成
 │   └── docker-compose.yml
+├── dufs/                       # 选择 7 时生成
+│   ├── docker-compose.yml
+│   └── data/                   # 默认静态文件目录，直链访问这里的文件
 └── nginx/
     ├── docker-compose.yml
     ├── certs/
@@ -427,22 +435,24 @@ docker compose down -v --remove-orphans
         ├── sub2api.conf          # 选择 3 时生成
         ├── webui.conf            # 选择 4 时生成
         ├── newapi-v2.conf        # 选择 5 时生成
-        └── gemini-desk.conf      # 选择 6 时生成
+        ├── gemini-desk.conf      # 选择 6 时生成
+        └── dufs.conf             # 选择 7 时生成
 ```
 
 ## 6. 注意事项
 
 - Docker 安装菜单优先使用官方软件源；未内置的 Linux 发行版可选择 Docker 官方 `get.docker.com` 便捷脚本兜底。
 - 配置 Docker 镜像源会修改 `/etc/docker/daemon.json`。
-- Nginx 默认必装；New API、CPA、Sub2API、GPT Image WebUI 和 Gemini Image Desk 默认不暴露宿主机端口，只通过 Nginx 代理访问。
+- Nginx 默认必装；New API、CPA、Sub2API、GPT Image WebUI、Gemini Image Desk 和 Dufs 默认不暴露宿主机端口，只通过 Nginx 代理访问。
 - PostgreSQL 和 Redis 是旧版 New API / 新版 NewAPI / Sub2API 的依赖，不需要在服务选择里单独选择。
-- New API、CPA、Sub2API、GPT Image WebUI 和 Gemini Image Desk 应用容器都会加入 `public-net`；默认情况下它对应外部 Docker 网络 `app-net`。
+- New API、CPA、Sub2API、GPT Image WebUI、Gemini Image Desk 和 Dufs 应用容器都会加入 `public-net`；默认情况下它对应外部 Docker 网络 `app-net`。
 - Sub2API 的 PostgreSQL 和 Redis 只加入独立内部网络，不暴露给宿主机。
 - GPT Image WebUI 的 `generated-images/` 和 `logs/` 会自动设置为容器可写，避免非 root 容器用户写入图片时报权限错误。
+- Dufs 默认目录是 `/opt/ai-api-stack/dufs/data`，匿名用户可直链读取文件，管理员登录后可上传和删除文件。
 - `SESSION_SECRET` 和 `CRYPTO_SECRET` 是 New API 内部密钥，不是后台登录密码。
 - 阿里云 `Ali_Key` / `Ali_Secret` 不要公开，泄露后请立即禁用或轮换。
 - 手动 DNS TXT 签发证书不绑定域名服务商，但不能无人值守自动续期；生产环境长期使用推荐 DNS API 模式。
-- 公网 HTTPS 推荐使用泛域名证书，New API、CPA、Sub2API、GPT Image WebUI 和 Gemini Image Desk 可以共用同一张证书。
+- 公网 HTTPS 推荐使用泛域名证书，New API、CPA、Sub2API、GPT Image WebUI、Gemini Image Desk 和 Dufs 可以共用同一张证书。
 - 重新部署时脚本会重写 `default.conf` 和本次选择服务对应的 Nginx 配置；自定义站点建议单独放到其他 `.conf` 文件。
 
 ## 7. 开源许可
