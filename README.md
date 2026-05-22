@@ -1,4 +1,7 @@
 <div align="center">
+  <p>
+    <img src="docs/banner.png" alt="AI API Stack 一键部署脚本" width="100%" />
+  </p>
   <h1>AI API Stack 一键部署脚本</h1>
   <p><strong>Docker / nginx / new-api / newapi-v2 / cli-proxy-api / sub2api / gpt-image-2-webui / gemini-image-desk / PostgreSQL / Redis</strong></p>
   <p>一个交互式 Shell 脚本，从 Docker 环境准备到服务部署、证书、更新和 Nginx 运维都集中到一个入口。</p>
