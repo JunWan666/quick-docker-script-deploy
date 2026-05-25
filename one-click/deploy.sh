@@ -18,7 +18,10 @@ DEFAULT_STACK_DIR="/opt/ai-api-stack"
 DOCKER_COMPOSE=()
 SELECTED_SERVICES=()
 COMPOSE_TARGETS=()
+EXISTING_APP_SERVICES=()
 DEPLOY_ALL=true
+EXISTING_STACK=false
+PRESERVE_EXISTING_SERVICES=true
 ACME_SH_BIN=""
 
 DOCKER_DAEMON_JSON_PATH="/etc/docker/daemon.json"
@@ -473,17 +476,17 @@ ensure_available_port() {
 resolve_publish_ports() {
   local skip_port=""
 
-  if needs_newapi_config && [[ "$NEWAPI_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+  if needs_newapi_config && [[ "$NEWAPI_PUBLISH_HOST_PORT_VALUE" == "true" ]] && ! service_was_existing "new-api"; then
     ensure_available_port NEWAPI_HOST_PORT_VALUE "New API 直连" 3000
   fi
 
-  if needs_newapi_v2_config && [[ "$NEWAPI_V2_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+  if needs_newapi_v2_config && [[ "$NEWAPI_V2_PUBLISH_HOST_PORT_VALUE" == "true" ]] && ! service_was_existing "newapi-v2"; then
     skip_port=""
     needs_newapi_config && skip_port="$NEWAPI_HOST_PORT_VALUE"
     ensure_available_port NEWAPI_V2_HOST_PORT_VALUE "新版 NewAPI 直连" 3002 "$skip_port"
   fi
 
-  if needs_cliproxy_config && [[ "$CLIPROXY_PUBLISH_HOST_PORTS_VALUE" == "true" ]]; then
+  if needs_cliproxy_config && [[ "$CLIPROXY_PUBLISH_HOST_PORTS_VALUE" == "true" ]] && ! service_was_existing "cli-proxy-api"; then
     ensure_available_port CLIPROXY_PORT_8317_VALUE "CLIProxyAPI 8317 直连" 8317
     ensure_available_port CLIPROXY_PORT_8085_VALUE "CLIProxyAPI 8085 直连" 8085 "$CLIPROXY_PORT_8317_VALUE"
     ensure_available_port CLIPROXY_PORT_1455_VALUE "CLIProxyAPI 1455 直连" 1455
@@ -492,21 +495,21 @@ resolve_publish_ports() {
     ensure_available_port CLIPROXY_PORT_11451_VALUE "CLIProxyAPI 11451 直连" 11451
   fi
 
-  if needs_sub2api_config && [[ "$SUB2API_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+  if needs_sub2api_config && [[ "$SUB2API_PUBLISH_HOST_PORT_VALUE" == "true" ]] && ! service_was_existing "sub2api"; then
     ensure_available_port SUB2API_HOST_PORT_VALUE "Sub2API 直连" 8081 "$NEWAPI_HOST_PORT_VALUE"
   fi
 
-  if needs_gpt_image_webui_config && [[ "$GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+  if needs_gpt_image_webui_config && [[ "$GPT_IMAGE_WEBUI_PUBLISH_HOST_PORT_VALUE" == "true" ]] && ! service_was_existing "gpt-image-2-webui"; then
     ensure_available_port GPT_IMAGE_WEBUI_HOST_PORT_VALUE "GPT Image WebUI 直连" 3001 "$SUB2API_HOST_PORT_VALUE"
   fi
 
-  if needs_gemini_image_desk_config && [[ "$GEMINI_IMAGE_DESK_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+  if needs_gemini_image_desk_config && [[ "$GEMINI_IMAGE_DESK_PUBLISH_HOST_PORT_VALUE" == "true" ]] && ! service_was_existing "gemini-image-desk"; then
     skip_port=""
     needs_gpt_image_webui_config && skip_port="$GPT_IMAGE_WEBUI_HOST_PORT_VALUE"
     ensure_available_port GEMINI_IMAGE_DESK_HOST_PORT_VALUE "Gemini Image Desk 直连" 3003 "$skip_port"
   fi
 
-  if needs_dufs_config && [[ "$DUFS_PUBLISH_HOST_PORT_VALUE" == "true" ]]; then
+  if needs_dufs_config && [[ "$DUFS_PUBLISH_HOST_PORT_VALUE" == "true" ]] && ! service_was_existing "dufs"; then
     skip_port=""
     needs_gemini_image_desk_config && skip_port="$GEMINI_IMAGE_DESK_HOST_PORT_VALUE"
     ensure_available_port DUFS_HOST_PORT_VALUE "Dufs 静态文件服务直连" 5000 "$skip_port"
@@ -517,36 +520,38 @@ resolve_publish_ports() {
   fi
 
   if [[ "$NGINX_DEPLOY_MODE_VALUE" == "lan" ]]; then
-    if needs_newapi_config; then
+    if needs_newapi_config && ! service_was_existing "new-api"; then
       ensure_available_port NGINX_LAN_API_PORT_VALUE "Nginx 局域网 API 入口" 18080
     fi
-    if needs_cliproxy_config; then
+    if needs_cliproxy_config && ! service_was_existing "cli-proxy-api"; then
       ensure_available_port NGINX_LAN_ADMIN_PORT_VALUE "Nginx 局域网管理端入口" 18081 "$NGINX_LAN_API_PORT_VALUE"
     fi
-    if needs_sub2api_config; then
+    if needs_sub2api_config && ! service_was_existing "sub2api"; then
       ensure_available_port NGINX_LAN_SUB2API_PORT_VALUE "Nginx 局域网 Sub2API 入口" 18082 "$NGINX_LAN_ADMIN_PORT_VALUE"
     fi
-    if needs_gpt_image_webui_config; then
+    if needs_gpt_image_webui_config && ! service_was_existing "gpt-image-2-webui"; then
       ensure_available_port NGINX_LAN_WEBUI_PORT_VALUE "Nginx 局域网 GPT Image WebUI 入口" 18083 "$NGINX_LAN_SUB2API_PORT_VALUE"
     fi
-    if needs_newapi_v2_config; then
+    if needs_newapi_v2_config && ! service_was_existing "newapi-v2"; then
       skip_port=""
       needs_gpt_image_webui_config && skip_port="$NGINX_LAN_WEBUI_PORT_VALUE"
       ensure_available_port NGINX_LAN_NEWAPI_V2_PORT_VALUE "Nginx 局域网新版 NewAPI 入口" 18084 "$skip_port"
     fi
-    if needs_gemini_image_desk_config; then
+    if needs_gemini_image_desk_config && ! service_was_existing "gemini-image-desk"; then
       skip_port=""
       needs_newapi_v2_config && skip_port="$NGINX_LAN_NEWAPI_V2_PORT_VALUE"
       ensure_available_port NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE "Nginx 局域网 Gemini Image Desk 入口" 18085 "$skip_port"
     fi
-    if needs_dufs_config; then
+    if needs_dufs_config && ! service_was_existing "dufs"; then
       skip_port=""
       needs_gemini_image_desk_config && skip_port="$NGINX_LAN_GEMINI_IMAGE_DESK_PORT_VALUE"
       ensure_available_port NGINX_LAN_DUFS_PORT_VALUE "Nginx 局域网 Dufs 静态文件入口" 18086 "$skip_port"
     fi
   else
-    ensure_available_port NGINX_HTTP_PORT_VALUE "Nginx 公网 HTTP 入口" 18080
-    if [[ "$NGINX_ENABLE_HTTPS" == "true" ]]; then
+    if [[ "$EXISTING_STACK" != "true" ]]; then
+      ensure_available_port NGINX_HTTP_PORT_VALUE "Nginx 公网 HTTP 入口" 18080
+    fi
+    if [[ "$NGINX_ENABLE_HTTPS" == "true" && "$EXISTING_STACK" != "true" ]]; then
       ensure_available_port NGINX_HTTPS_PORT_VALUE "Nginx 公网 HTTPS 入口" 18443 "$NGINX_HTTP_PORT_VALUE"
     fi
   fi
@@ -876,6 +881,50 @@ contains_service() {
   done
 
   return 1
+}
+
+detect_existing_app_services() {
+  local compose_file="$STACK_DIR/docker-compose.yml"
+  local service=""
+
+  EXISTING_STACK=false
+  EXISTING_APP_SERVICES=()
+  [[ -f "$compose_file" ]] || return 0
+
+  EXISTING_STACK=true
+  for service in new-api newapi-v2 cli-proxy-api sub2api gpt-image-2-webui gemini-image-desk dufs; do
+    if grep -qE "^  ${service}:$" "$compose_file"; then
+      EXISTING_APP_SERVICES+=("$service")
+    fi
+  done
+}
+
+service_was_existing() {
+  local service="$1"
+
+  contains_service "$service" "${EXISTING_APP_SERVICES[@]}"
+}
+
+merge_existing_services_if_requested() {
+  local service=""
+
+  [[ "$EXISTING_STACK" == "true" ]] || return 0
+  [[ "${#EXISTING_APP_SERVICES[@]}" -gt 0 ]] || return 0
+  [[ "$DEPLOY_ALL" != "true" ]] || return 0
+
+  field_line "当前已部署服务：" "$(join_list "${EXISTING_APP_SERVICES[@]}")"
+  read_yes_no PRESERVE_EXISTING_SERVICES "是否保留已有服务并在此基础上追加本次选择" "$PRESERVE_EXISTING_SERVICES"
+
+  if [[ "$PRESERVE_EXISTING_SERVICES" != "true" ]]; then
+    subtle_note "将只按本次选择重写 Compose；未选择的旧服务不会被当前 Compose 管理。"
+    return 0
+  fi
+
+  for service in "${EXISTING_APP_SERVICES[@]}"; do
+    append_selected_service "$service"
+  done
+
+  printf '实际部署/保留：%s\n' "$(join_list "${SELECTED_SERVICES[@]}")"
 }
 
 selected_or_all() {
@@ -1853,6 +1902,7 @@ collect_answers() {
   if [[ "$DUFS_IMAGE_VALUE" == "sigoden/dufs:latest" ]]; then
     DUFS_IMAGE_VALUE="tannic666/dufs:latest"
   fi
+  detect_existing_app_services
   read_line PROJECT_NAME_VALUE "Compose 项目名" "$PROJECT_NAME_VALUE"
   read_line TZ_VALUE "时区" "$TZ_VALUE"
   read_yes_no ADVANCED_CONFIG_VALUE "是否启用高级配置（自定义镜像、端口、上游地址时使用）" "$ADVANCED_CONFIG_VALUE"
@@ -1865,6 +1915,7 @@ collect_answers() {
   fi
 
   select_services
+  merge_existing_services_if_requested
 
   if needs_newapi_config; then
     if [[ "$ADVANCED_CONFIG_VALUE" == "true" ]]; then
@@ -4099,6 +4150,82 @@ issue_aliyun_certificate() {
   install_acme_certificate_files "$base_domain" "$cert_file" "$key_file" "$include_wildcard"
 }
 
+issue_cloudflare_certificate() {
+  local base_domain=""
+  local include_wildcard="true"
+  local cf_token=""
+  local cf_account_id=""
+  local cf_zone_id=""
+  local use_existing_cf="false"
+  local cert_file=""
+  local key_file=""
+  local domain_args=()
+
+  section_title "Cloudflare DNS 签发证书"
+  ensure_acme_sh
+  set_acme_default_ca
+  prepare_certificate_directory
+
+  subtle_note "请在 Cloudflare 创建 API Token，建议权限为 Zone:DNS:Edit 和 Zone:Zone:Read，并限制到对应 Zone。"
+  subtle_note "CF_Token 会明文输入；acme.sh 会保存到 ~/.acme.sh/account.conf 或域名配置中供自动续签使用。"
+
+  if [[ -n "${CF_Token:-}" ]]; then
+    use_existing_cf="true"
+    read_yes_no use_existing_cf "检测到当前环境已有 CF_Token，是否直接使用" "$use_existing_cf"
+  fi
+
+  if [[ "$use_existing_cf" == "true" ]]; then
+    cf_token="$CF_Token"
+    cf_account_id="${CF_Account_ID:-}"
+    cf_zone_id="${CF_Zone_ID:-}"
+  else
+    read_line cf_token "CF_Token（明文）" ""
+    read_line cf_account_id "CF_Account_ID（可留空）" "${CF_Account_ID:-}"
+    read_line cf_zone_id "CF_Zone_ID（可留空，填了更稳定）" "${CF_Zone_ID:-}"
+  fi
+
+  [[ -n "$cf_token" ]] || die "CF_Token 不能为空。"
+  export CF_Token="$cf_token"
+  if [[ -n "$cf_account_id" ]]; then
+    export CF_Account_ID="$cf_account_id"
+  else
+    unset CF_Account_ID 2>/dev/null || true
+  fi
+  if [[ -n "$cf_zone_id" ]]; then
+    export CF_Zone_ID="$cf_zone_id"
+  else
+    unset CF_Zone_ID 2>/dev/null || true
+  fi
+
+  read_line base_domain "主域名，例如 774966.xyz" ""
+  [[ -n "$base_domain" ]] || die "主域名不能为空。"
+  read_yes_no include_wildcard "是否同时签发泛域名 *.${base_domain}" "$include_wildcard"
+
+  domain_args=(-d "$base_domain")
+  if [[ "$include_wildcard" == "true" ]]; then
+    domain_args+=(-d "*.${base_domain}")
+  fi
+
+  read_line cert_file "安装后的 fullchain 证书文件名" "${base_domain}.fullchain.cer"
+  read_line key_file "安装后的私钥文件名" "${base_domain}.key"
+
+  section_title "签发证书"
+  "$ACME_SH_BIN" --issue --dns dns_cf "${domain_args[@]}"
+
+  install_acme_certificate_files "$base_domain" "$cert_file" "$key_file" "$include_wildcard"
+}
+
+disable_manual_dns_auto_renewal() {
+  local base_domain="$1"
+
+  section_title "关闭手动 DNS 自动续期记录"
+  if "$ACME_SH_BIN" --remove -d "$base_domain" >/dev/null 2>&1; then
+    subtle_note "已从 acme.sh 自动续期列表移除手动 DNS 证书；已安装到 nginx/certs 的证书文件会保留。"
+  else
+    subtle_note "未能自动移除 acme.sh 续期记录；如后续 cron 续期报错，可手动执行：$ACME_SH_BIN --remove -d $base_domain"
+  fi
+}
+
 issue_manual_dns_certificate() {
   local base_domain=""
   local include_wildcard="true"
@@ -4147,7 +4274,8 @@ issue_manual_dns_certificate() {
     --yes-I-know-dns-manual-mode-enough-go-ahead-please
 
   install_acme_certificate_files "$base_domain" "$cert_file" "$key_file" "$include_wildcard"
-  subtle_note "该证书使用手动 DNS 模式，后续续期仍需人工处理 TXT 记录；如需自动续期，建议改用 DNS API 模式。"
+  disable_manual_dns_auto_renewal "$base_domain"
+  subtle_note "该证书使用手动 DNS 模式，本脚本不会保留自动续期；如需自动续期，建议改用阿里云或 Cloudflare DNS API 模式。"
 }
 
 renew_acme_certificates() {
@@ -4161,10 +4289,11 @@ show_certificate_menu() {
   section_title "SSL 证书 / acme.sh"
   menu_option "$COLOR_GREEN" "[1]" "检查/安装 acme.sh"
   menu_option "$COLOR_CYAN" "[2]" "阿里云 DNS 签发并安装证书"
-  menu_option "$COLOR_MAGENTA" "[3]" "手动 DNS 签发并安装证书"
-  menu_option "$COLOR_BLUE" "[4]" "手动续签全部证书"
-  menu_option "$COLOR_MAGENTA" "[5]" "查看 acme.sh 版本"
-  menu_option "$COLOR_DIM" "[6]" "返回/退出"
+  menu_option "$COLOR_CYAN" "[3]" "Cloudflare DNS Token 签发并安装证书"
+  menu_option "$COLOR_MAGENTA" "[4]" "手动 DNS 签发并安装证书（不保留自动续期）"
+  menu_option "$COLOR_BLUE" "[5]" "手动续签全部 DNS API 证书"
+  menu_option "$COLOR_MAGENTA" "[6]" "查看 acme.sh 版本"
+  menu_option "$COLOR_DIM" "[7]" "返回/退出"
 }
 
 manage_certificates() {
@@ -4181,21 +4310,24 @@ manage_certificates() {
       2|issue|cert|ssl|aliyun|ali|dns_ali)
         issue_aliyun_certificate
         ;;
-      3|manual|manual-dns|dns-manual|txt|dns_txt)
+      3|cloudflare|cf|dns_cf)
+        issue_cloudflare_certificate
+        ;;
+      4|manual|manual-dns|dns-manual|txt|dns_txt)
         issue_manual_dns_certificate
         ;;
-      4|renew|cron)
+      5|renew|cron)
         renew_acme_certificates
         ;;
-      5|version|-v|--version)
+      6|version|-v|--version)
         ensure_acme_sh
         "$ACME_SH_BIN" --version || true
         ;;
-      6|back|exit|quit|q)
+      7|back|exit|quit|q)
         return 0
         ;;
       *)
-        printf '%s\n' "$(color_text "$COLOR_YELLOW" "请输入 1-6。")"
+        printf '%s\n' "$(color_text "$COLOR_YELLOW" "请输入 1-7。")"
         ;;
     esac
   done
@@ -4537,6 +4669,10 @@ main() {
         return 0
       fi
       run_action "$action"
+      if [[ "$action" == "deploy" ]]; then
+        printf '\n%s\n' "$(color_text "$COLOR_DIM" "部署完成，已退出脚本。")"
+        return 0
+      fi
       printf '\n%s\n' "$(color_text "$COLOR_DIM" "操作完成，已返回主菜单。")"
     done
   fi

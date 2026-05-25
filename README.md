@@ -38,7 +38,7 @@
 - Sub2API、GPT Image WebUI、Gemini Image Desk、Dufs 等应用容器默认加入同一个 `public-net`，外部网络名默认是 `app-net`
 - 支持局域网部署和公网域名部署
 - 支持公网 HTTPS、80 跳转 443、共用证书
-- 支持 acme.sh + 阿里云 DNS API 或手动 DNS TXT 签发泛域名证书，并在后续 HTTPS 配置中自动复用上次证书文件名
+- 支持 acme.sh + 阿里云 DNS API、Cloudflare DNS Token 或手动 DNS TXT 签发泛域名证书，并在后续 HTTPS 配置中自动复用上次证书文件名
 - 支持按需配置 Docker 国内镜像源
 - 支持更新镜像、重建容器、Nginx 测试/重载/重启/日志
 
@@ -113,7 +113,7 @@ bash one-click/deploy.sh
 9  退出
 ```
 
-不带参数启动时会停留在主菜单中；选择某个功能执行完成后会自动返回主菜单。带参数执行时，例如 `bash one-click/deploy.sh docker`，只执行该功能一次并退出。
+不带参数启动时会停留在主菜单中；选择“一键部署”完成后会直接退出脚本，其他运维功能执行后会返回主菜单。带参数执行时，例如 `bash one-click/deploy.sh docker`，只执行该功能一次并退出。
 
 也可以直接指定功能：
 
@@ -171,6 +171,15 @@ bash one-click/deploy.sh cert
 6. 将证书安装到 `/opt/ai-api-stack/nginx/certs/`。
 7. 部署公网 HTTPS 时填写生成的证书文件名。
 
+Cloudflare DNS Token 推荐流程：
+
+1. 在 Cloudflare 创建 API Token，建议只授权对应 Zone 的 `Zone:DNS:Edit` 和 `Zone:Zone:Read`。
+2. 在证书菜单中选择 Cloudflare DNS Token 签发。
+3. 输入 `CF_Token`，可选填写 `CF_Account_ID` 和 `CF_Zone_ID`。
+4. 输入主域名，例如 `774966.xyz`。
+5. 选择是否同时签发泛域名 `*.774966.xyz`。
+6. 证书会安装到 `/opt/ai-api-stack/nginx/certs/`，后续可由 acme.sh 自动续期。
+
 通用手动 DNS 流程：
 
 1. 在证书菜单中选择手动 DNS 签发。
@@ -181,7 +190,7 @@ bash one-click/deploy.sh cert
 
 DNS 方式签发证书不依赖 Nginx 是否已经启动，所以可以先申请证书再部署项目。已经部署过也可以后补证书，然后通过 Nginx 管理菜单重载。
 
-注意：阿里云 DNS API 模式可以由 acme.sh 自动续期；手动 DNS TXT 模式基本通用，但不能无人值守自动续期，每次续期都需要重新添加 TXT 记录。
+注意：阿里云 DNS API 和 Cloudflare DNS Token 模式可以由 acme.sh 自动续期；手动 DNS TXT 模式基本通用，但本脚本会在签发并安装后移除 acme.sh 自动续期记录，每次续期都需要重新走手动 DNS 流程。
 
 ### 4.3 一键部署服务
 
@@ -241,6 +250,8 @@ Nginx 默认作为统一网关必装，不需要选择。
 - `56`：部署新版 NewAPI + Gemini Image Desk
 - 域名建议：通用静态资源优先用 `file.774966.xyz`；如果要按用途拆分，也可以让 `img.774966.xyz page.774966.xyz` 和 `file.774966.xyz` 指向同一 Dufs 目录
 - `1234567`：部署全部服务
+
+再次运行部署并检测到已有服务时，脚本默认会保留已有服务，并在此基础上追加本次选择的新服务；这样新增 Dufs 等服务时不会把已有服务的 `.env` 配置和 Nginx 端口改掉。
 
 ### 4.4 局域网部署
 
@@ -450,8 +461,8 @@ docker compose down -v --remove-orphans
 - GPT Image WebUI 的 `generated-images/` 和 `logs/` 会自动设置为容器可写，避免非 root 容器用户写入图片时报权限错误。
 - Dufs 默认目录是 `/opt/ai-api-stack/dufs/data`，匿名用户可直链读取文件，管理员登录后可上传和删除文件。
 - `SESSION_SECRET` 和 `CRYPTO_SECRET` 是 New API 内部密钥，不是后台登录密码。
-- 阿里云 `Ali_Key` / `Ali_Secret` 不要公开，泄露后请立即禁用或轮换。
-- 手动 DNS TXT 签发证书不绑定域名服务商，但不能无人值守自动续期；生产环境长期使用推荐 DNS API 模式。
+- 阿里云 `Ali_Key` / `Ali_Secret` 和 Cloudflare `CF_Token` 不要公开，泄露后请立即禁用或轮换。
+- 手动 DNS TXT 签发证书不绑定域名服务商，但不会保留自动续期；生产环境长期使用推荐 DNS API 模式。
 - 公网 HTTPS 推荐使用泛域名证书，New API、CPA、Sub2API、GPT Image WebUI、Gemini Image Desk 和 Dufs 可以共用同一张证书。
 - 重新部署时脚本会重写 `default.conf` 和本次选择服务对应的 Nginx 配置；自定义站点建议单独放到其他 `.conf` 文件。
 
