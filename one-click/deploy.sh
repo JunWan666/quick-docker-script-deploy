@@ -4376,35 +4376,47 @@ show_misc_menu() {
   menu_option "$COLOR_DIM" "[3]" "返回/退出"
 }
 
-reload_bashrc_now() {
+print_bashrc_reload_hint() {
   local bashrc="$1"
 
   if [[ ! -r "$bashrc" ]]; then
-    subtle_note "未能读取 $bashrc，跳过自动 source。"
+    subtle_note "未能读取 $bashrc，请重新登录后查看是否生效。"
     return 0
   fi
 
-  set +u
-  # shellcheck disable=SC1090
-  if source "$bashrc"; then
-    field_line "自动执行：" "source $bashrc"
-  else
-    subtle_note "自动 source $bashrc 时返回非 0；配置文件已写入，可以重新登录后生效。"
-  fi
-  set -Eeuo pipefail
+  field_line "手动生效：" "source $bashrc"
+  subtle_note "也可以重新登录 SSH 后生效。"
+}
 
-  if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
-    subtle_note "当前脚本以 source 方式运行，配置已作用到当前 Shell。"
+remove_ai_bash_colors_block() {
+  local bashrc="$1"
+  local tmp_file=""
+
+  grep -q '^# AI API Stack bash colors$' "$bashrc" || return 0
+
+  command -v awk >/dev/null 2>&1 || {
+    subtle_note "检测到旧版 AI API Stack 颜色配置块，但未检测到 awk，已跳过自动清理。"
     return 0
-  fi
+  }
 
-  if [[ -t 0 && -t 1 ]] && command -v bash >/dev/null 2>&1; then
-    subtle_note "包括 root 在内，普通执行脚本时子进程都无法直接修改父级 SSH Shell。"
-    subtle_note "现在自动进入一个已加载该配置的新 Bash，无需手动复制 source 命令；输入 exit 可回到原来的 Shell。"
-    exec bash --rcfile "$bashrc" -i
-  fi
+  tmp_file="$(mktemp)"
+  awk '
+    /^# AI API Stack bash colors$/ {
+      skip = 1
+      next
+    }
+    /^# End AI API Stack bash colors$/ {
+      skip = 0
+      next
+    }
+    !skip {
+      print
+    }
+  ' "$bashrc" > "$tmp_file"
+  cp "$tmp_file" "$bashrc"
+  rm -f "$tmp_file"
 
-  subtle_note "当前不是交互式终端，已跳过自动进入新 Bash。"
+  subtle_note "已移除旧版 AI API Stack 颜色配置块。"
 }
 
 enable_bash_colors() {
@@ -4430,6 +4442,8 @@ enable_bash_colors() {
     field_line "创建文件：" "$bashrc"
   fi
 
+  remove_ai_bash_colors_block "$bashrc"
+
   sed -i \
     -e 's/^[[:space:]]*#\([[:space:]]*force_color_prompt=yes\)/\1/' \
     -e 's/^[[:space:]]*#\([[:space:]]*export LS_OPTIONS=.*--color=auto.*\)/\1/' \
@@ -4439,40 +4453,8 @@ enable_bash_colors() {
     -e 's/^[[:space:]]*#\([[:space:]]*alias l=.*LS_OPTIONS.*\)/\1/' \
     "$bashrc"
 
-  if ! grep -q "AI API Stack bash colors" "$bashrc"; then
-    cat >> "$bashrc" <<'BASHRC'
-
-# AI API Stack bash colors
-if [ -n "$PS1" ]; then
-  if [ "$(id -u 2>/dev/null)" = "0" ]; then
-    __ai_api_stack_prompt_color='01;31m'
-  else
-    __ai_api_stack_prompt_color='01;32m'
-  fi
-  PS1='${debian_chroot:+($debian_chroot)}\[\033['"$__ai_api_stack_prompt_color"'\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
-  unset __ai_api_stack_prompt_color
-fi
-
-if command -v dircolors >/dev/null 2>&1; then
-  if [ -r ~/.dircolors ]; then
-    eval "$(dircolors -b ~/.dircolors)"
-  else
-    eval "$(dircolors -b)"
-  fi
-  alias ls='ls --color=auto'
-  alias grep='grep --color=auto'
-  alias fgrep='fgrep --color=auto'
-  alias egrep='egrep --color=auto'
-fi
-alias ll='ls -l'
-alias la='ls -A'
-alias l='ls -CF'
-# End AI API Stack bash colors
-BASHRC
-  fi
-
   field_line "配置文件：" "$bashrc"
-  reload_bashrc_now "$bashrc"
+  print_bashrc_reload_hint "$bashrc"
 }
 
 validate_hostname_label() {
