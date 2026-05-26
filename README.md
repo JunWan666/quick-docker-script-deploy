@@ -382,6 +382,7 @@ bash one-click/deploy.sh misc
 当前包含：
 
 - 启用 Bash/ls 颜色：备份当前用户的 `~/.bashrc`，启用常见颜色配置，并追加幂等的颜色配置块。
+- 重命名服务器显示名称：设置系统 hostname，并更新 `/etc/hosts` 映射；例如改成 `susu` 后，常见 Bash 提示符会显示为 `root@susu:~#`。
 
 修改后脚本会自动执行 `source ~/.bashrc`。包括 root 在内，如果脚本是普通方式执行，子进程无法直接修改父级 SSH Shell，脚本会自动进入一个已加载配置的新 Bash；输入 `exit` 可回到原来的 Shell。
 

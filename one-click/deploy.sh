@@ -4372,7 +4372,8 @@ uninstall_stack() {
 show_misc_menu() {
   section_title "杂项"
   menu_option "$COLOR_GREEN" "[1]" "启用 Bash/ls 颜色"
-  menu_option "$COLOR_DIM" "[2]" "返回/退出"
+  menu_option "$COLOR_CYAN" "[2]" "重命名服务器显示名称"
+  menu_option "$COLOR_DIM" "[3]" "返回/退出"
 }
 
 reload_bashrc_now() {
@@ -4474,6 +4475,120 @@ BASHRC
   reload_bashrc_now "$bashrc"
 }
 
+validate_hostname_label() {
+  local hostname_value="$1"
+
+  [[ ${#hostname_value} -le 63 ]] || return 1
+  [[ "$hostname_value" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]]
+}
+
+update_hosts_hostname() {
+  local old_hostname="$1"
+  local new_hostname="$2"
+  local hosts_file="/etc/hosts"
+  local backup=""
+  local tmp_file=""
+
+  if [[ ! -f "$hosts_file" ]]; then
+    subtle_note "未找到 $hosts_file，已跳过 hosts 映射更新。"
+    return 0
+  fi
+
+  command -v awk >/dev/null 2>&1 || {
+    subtle_note "未检测到 awk，已跳过 hosts 映射更新。"
+    return 0
+  }
+
+  backup="${hosts_file}.bak-$(date +%Y%m%d-%H%M%S)"
+  tmp_file="$(mktemp)"
+
+  awk -v old="$old_hostname" -v new="$new_hostname" '
+    BEGIN {
+      has_new = 0
+      updated_127_0_1_1 = 0
+    }
+    /^[[:space:]]*#/ {
+      print
+      next
+    }
+    $1 == "127.0.1.1" {
+      print "127.0.1.1 " new
+      has_new = 1
+      updated_127_0_1_1 = 1
+      next
+    }
+    {
+      if (old != "") {
+        for (i = 2; i <= NF; i++) {
+          if ($i == old) {
+            $i = new
+          }
+        }
+      }
+      for (i = 2; i <= NF; i++) {
+        if ($i == new) {
+          has_new = 1
+        }
+      }
+      print
+    }
+    END {
+      if (!updated_127_0_1_1 && !has_new) {
+        print "127.0.1.1 " new
+      }
+    }
+  ' "$hosts_file" > "$tmp_file"
+
+  run_root cp "$hosts_file" "$backup"
+  run_root cp "$tmp_file" "$hosts_file"
+  rm -f "$tmp_file"
+
+  field_line "hosts 备份：" "$backup"
+}
+
+rename_server_hostname() {
+  local current_hostname=""
+  local current_short=""
+  local new_hostname=""
+  local confirm_change="true"
+
+  section_title "重命名服务器显示名称"
+
+  current_hostname="$(hostname 2>/dev/null || true)"
+  current_short="${current_hostname%%.*}"
+  [[ -n "$current_short" ]] || current_short="susu"
+
+  field_line "当前名称：" "${current_hostname:-未知}"
+  subtle_note "请输入短主机名，例如 susu；它会显示在常见 Bash 提示符的 root@名称 中。"
+  read_line new_hostname "新的服务器显示名称" "$current_short"
+  new_hostname="$(printf '%s' "$new_hostname" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+  validate_hostname_label "$new_hostname" || die "服务器显示名称只能包含字母、数字、短横线，不能以短横线开头或结尾，最长 63 个字符。"
+
+  if [[ "$new_hostname" == "$current_short" ]]; then
+    subtle_note "服务器显示名称未变化，已跳过。"
+    return 0
+  fi
+
+  field_line "新名称：" "$new_hostname"
+  read_yes_no confirm_change "是否确认修改系统 hostname" "$confirm_change"
+  [[ "$confirm_change" == "true" ]] || die "已取消重命名服务器显示名称。"
+
+  if command -v hostnamectl >/dev/null 2>&1 && run_root hostnamectl set-hostname "$new_hostname"; then
+    field_line "执行方式：" "hostnamectl set-hostname $new_hostname"
+  else
+    command -v hostname >/dev/null 2>&1 || die "未检测到 hostname 命令，无法修改系统 hostname。"
+    run_root hostname "$new_hostname"
+    printf '%s\n' "$new_hostname" | run_root tee /etc/hostname >/dev/null
+    field_line "执行方式：" "hostname $new_hostname + 写入 /etc/hostname"
+  fi
+
+  update_hosts_hostname "$current_short" "$new_hostname"
+
+  field_line "当前 hostname：" "$(hostname 2>/dev/null || printf '%s' "$new_hostname")"
+  subtle_note "如果当前 SSH 提示符没有立刻变化，重新登录或执行 exec bash -l 后即可看到新名称。"
+}
+
 manage_misc() {
   local action=""
 
@@ -4484,11 +4599,14 @@ manage_misc() {
       1|bash|color|colors|ls|prompt)
         enable_bash_colors
         ;;
-      2|back|exit|quit|q)
+      2|hostname|host|name|rename|server|display)
+        rename_server_hostname
+        ;;
+      3|back|exit|quit|q)
         return 0
         ;;
       *)
-        printf '%s\n' "$(color_text "$COLOR_YELLOW" "请输入 1 或 2。")"
+        printf '%s\n' "$(color_text "$COLOR_YELLOW" "请输入 1-3。")"
         ;;
     esac
   done
